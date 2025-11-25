@@ -12,6 +12,8 @@ pub enum BinOp {
 pub enum IRExpr {
     /// A constant integer value.
     Constant(i64),
+    /// A variable lookup.
+    Variable(String),
     /// A binary operation.
     BinaryOp {
         op: BinOp,
@@ -25,4 +27,6 @@ pub enum IRExpr {
 pub enum IRStmt {
     /// A print statement.
     Print(IRExpr),
+    /// An assignment statement.
+    Assign { target: String, value: IRExpr },
 }

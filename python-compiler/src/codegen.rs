@@ -3,18 +3,22 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CodeGenError {
     #[error("LLVM module verification failed: {0}")]
     ModuleVerification(String),
+    #[error("Undefined variable: {0}")]
+    UndefinedVariable(String),
 }
 
 pub struct Compiler<'ctx> {
     context: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
+    variables: HashMap<String, PointerValue<'ctx>>,
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -25,10 +29,11 @@ impl<'ctx> Compiler<'ctx> {
             context,
             builder,
             module,
+            variables: HashMap::new(),
         }
     }
 
-    pub fn compile_program(&self, program: &[IRStmt]) -> Result<String, CodeGenError> {
+    pub fn compile_program(mut self, program: &[IRStmt]) -> Result<String, CodeGenError> {
         let i32_type = self.context.i32_type();
         let main_fn_type = i32_type.fn_type(&[], false);
         let main_fn = self.module.add_function("main", main_fn_type, None);
@@ -36,7 +41,7 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.position_at_end(entry);
 
         for stmt in program {
-            self.compile_statement(stmt);
+            self.compile_statement(stmt)?;
         }
 
         self.builder
@@ -52,22 +57,42 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.module.print_to_string().to_string())
     }
 
-    fn compile_statement(&self, stmt: &IRStmt) {
+    fn compile_statement(&mut self, stmt: &IRStmt) -> Result<(), CodeGenError> {
         match stmt {
             IRStmt::Print(expr) => {
-                let value = self.compile_expression(expr);
+                let value = self.compile_expression(expr)?;
                 self.build_print(value);
             }
+            IRStmt::Assign { target, value } => {
+                let value = self.compile_expression(value)?;
+                let ptr = self.variables.get(target).copied().unwrap_or_else(|| {
+                    let ptr = self.create_entry_block_alloca(target);
+                    self.variables.insert(target.clone(), ptr);
+                    ptr
+                });
+                self.builder.build_store(ptr, value).unwrap();
+            }
         }
+        Ok(())
     }
 
-    fn compile_expression(&self, expr: &IRExpr) -> IntValue<'ctx> {
+    fn compile_expression(&self, expr: &IRExpr) -> Result<IntValue<'ctx>, CodeGenError> {
         match expr {
-            IRExpr::Constant(n) => self.context.i64_type().const_int(*n as u64, true),
+            IRExpr::Constant(n) => Ok(self.context.i64_type().const_int(*n as u64, true)),
+            IRExpr::Variable(name) => self
+                .variables
+                .get(name)
+                .map(|ptr| {
+                    self.builder
+                        .build_load(self.context.i64_type(), *ptr, name)
+                        .unwrap()
+                        .into_int_value()
+                })
+                .ok_or_else(|| CodeGenError::UndefinedVariable(name.clone())),
             IRExpr::BinaryOp { op, left, right } => {
-                let lhs = self.compile_expression(left);
-                let rhs = self.compile_expression(right);
-                match op {
+                let lhs = self.compile_expression(left)?;
+                let rhs = self.compile_expression(right)?;
+                let result = match op {
                     BinOp::Add => self.builder.build_int_add(lhs, rhs, "addtmp").unwrap(),
                     BinOp::Sub => self.builder.build_int_sub(lhs, rhs, "subtmp").unwrap(),
                     BinOp::Mul => self.builder.build_int_mul(lhs, rhs, "multmp").unwrap(),
@@ -75,9 +100,31 @@ impl<'ctx> Compiler<'ctx> {
                         .builder
                         .build_int_signed_div(lhs, rhs, "divtmp")
                         .unwrap(),
-                }
+                };
+                Ok(result)
             }
         }
+    }
+
+    fn create_entry_block_alloca(&self, name: &str) -> PointerValue<'ctx> {
+        let builder = self.context.create_builder();
+        let entry = self
+            .builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap()
+            .get_first_basic_block()
+            .unwrap();
+
+        match entry.get_first_instruction() {
+            Some(first_instr) => builder.position_before(&first_instr),
+            None => builder.position_at_end(entry),
+        }
+
+        builder
+            .build_alloca(self.context.i64_type(), name)
+            .unwrap()
     }
 
     fn add_printf(&self) -> FunctionValue<'ctx> {

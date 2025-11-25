@@ -37,6 +37,20 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
             }
             Err(LoweringError::UnsupportedStatement(stmt.clone()))
         }
+        ast::Stmt::Assign(ast::StmtAssign { targets, value, .. }) => {
+            if targets.len() != 1 {
+                return Err(LoweringError::UnsupportedStatement(stmt.clone()));
+            }
+            if let ast::Expr::Name(ast::ExprName { id, .. }) = &targets[0] {
+                let value = lower_expression(value)?;
+                Ok(IRStmt::Assign {
+                    target: id.to_string(),
+                    value,
+                })
+            } else {
+                Err(LoweringError::UnsupportedStatement(stmt.clone()))
+            }
+        }
         _ => Err(LoweringError::UnsupportedStatement(stmt.clone())),
     }
 }
@@ -48,6 +62,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
             ast::Constant::Int(n) => Ok(IRExpr::Constant(n.to_i64().unwrap())),
             _ => Err(LoweringError::UnsupportedExpression(expr.clone())),
         },
+        ast::Expr::Name(ast::ExprName { id, .. }) => Ok(IRExpr::Variable(id.to_string())),
         ast::Expr::BinOp(ast::ExprBinOp {
             left,
             op,

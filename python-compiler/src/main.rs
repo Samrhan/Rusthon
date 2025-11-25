@@ -2,12 +2,11 @@ use inkwell::context::Context;
 
 mod ast;
 mod codegen;
-mod compiler;
 mod lowering;
 mod parser;
 
 fn main() {
-    let source = "print(1 + 2 * 3)";
+    let source = "x = 10\ny = x + 5\nprint(y)";
     println!("Compiling: {}", source);
 
     let ast = match parser::parse_program(source) {
