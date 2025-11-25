@@ -1,0 +1,16 @@
+---
+source: tests/arithmetic.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+
+define i32 @main() {
+entry:
+  %printf_call = call i32 (ptr, ...) @printf(ptr @format_string, i64 7)
+  ret i32 0
+}
+
+declare i32 @printf(ptr, ...)
