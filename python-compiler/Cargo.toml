@@ -8,6 +8,7 @@ inkwell = { version = "0.7.0", features = ["llvm18-1"] }
 rustpython-parser = "0.4"
 thiserror = "1.0"
 ariadne = "0.4"     # Elegant error messages
+num-traits = "0.2"
 
 [dev-dependencies]
 insta = "1.34"      # Snapshot testing

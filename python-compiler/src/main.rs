@@ -7,14 +7,32 @@ mod lowering;
 mod parser;
 
 fn main() {
-    let source = "print(42)";
+    let source = "print(1 + 2 * 3)";
     println!("Compiling: {}", source);
 
+    let ast = match parser::parse_program(source) {
+        Ok(ast) => ast,
+        Err(e) => {
+            eprintln!("Parsing failed: {}", e);
+            return;
+        }
+    };
+
+    let ir = match lowering::lower_program(&ast) {
+        Ok(ir) => ir,
+        Err(e) => {
+            eprintln!("Lowering failed: {}", e);
+            return;
+        }
+    };
+
     let context = Context::create();
-    match codegen::compile_print_42(&context) {
-        Ok(ir) => {
+    let compiler = codegen::Compiler::new(&context);
+
+    match compiler.compile_program(&ir) {
+        Ok(llvm_ir) => {
             println!("Successfully generated LLVM IR:");
-            println!("{}", ir);
+            println!("{}", llvm_ir);
         }
         Err(e) => {
             eprintln!("Code generation failed: {}", e);
