@@ -401,7 +401,6 @@ dependencies = [
  "ariadne",
  "inkwell",
  "insta",
- "num-traits",
  "rustpython-parser",
  "thiserror 1.0.69",
 ]
