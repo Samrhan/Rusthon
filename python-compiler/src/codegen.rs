@@ -28,6 +28,8 @@ pub struct Compiler<'ctx> {
     module: Module<'ctx>,
     variables: HashMap<String, PointerValue<'ctx>>,
     functions: HashMap<String, FunctionValue<'ctx>>,
+    // Stack of (continue_target, break_target) basic blocks for nested loops
+    loop_stack: Vec<(inkwell::basic_block::BasicBlock<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)>,
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -40,6 +42,7 @@ impl<'ctx> Compiler<'ctx> {
             module,
             variables: HashMap::new(),
             functions: HashMap::new(),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -326,6 +329,9 @@ impl<'ctx> Compiler<'ctx> {
                 let loop_body_bb = self.context.append_basic_block(current_fn, "loop_body");
                 let loop_exit_bb = self.context.append_basic_block(current_fn, "loop_exit");
 
+                // Push loop targets onto the stack for break/continue
+                self.loop_stack.push((loop_cond_bb, loop_exit_bb));
+
                 // Jump to the condition check
                 self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
 
@@ -346,11 +352,120 @@ impl<'ctx> Compiler<'ctx> {
                 for stmt in body {
                     self.compile_statement(stmt, current_fn)?;
                 }
-                // Jump back to condition check
-                self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+                // Only add branch if current block doesn't already have a terminator
+                let current_block = self.builder.get_insert_block().unwrap();
+                if current_block.get_terminator().is_none() {
+                    self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+                }
+
+                // Pop loop targets from the stack
+                self.loop_stack.pop();
 
                 // Continue building after the loop
                 self.builder.position_at_end(loop_exit_bb);
+            }
+            IRStmt::For { var, start, end, body } => {
+                // Compile for loop as: var = start; while var < end: body; var += 1
+
+                // Initialize loop variable
+                let start_val = self.compile_expression(start)?;
+                let ptr = self.variables.get(var).copied().unwrap_or_else(|| {
+                    let ptr = self.create_entry_block_alloca(var, current_fn);
+                    self.variables.insert(var.clone(), ptr);
+                    ptr
+                });
+                self.builder.build_store(ptr, start_val).unwrap();
+
+                // Create basic blocks for loop condition, body, and exit
+                let loop_cond_bb = self.context.append_basic_block(current_fn, "for_cond");
+                let loop_body_bb = self.context.append_basic_block(current_fn, "for_body");
+                let loop_incr_bb = self.context.append_basic_block(current_fn, "for_incr");
+                let loop_exit_bb = self.context.append_basic_block(current_fn, "for_exit");
+
+                // Push loop targets onto the stack (continue goes to increment, break to exit)
+                self.loop_stack.push((loop_incr_bb, loop_exit_bb));
+
+                // Jump to the condition check
+                self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+
+                // Build the condition block (var < end)
+                self.builder.position_at_end(loop_cond_bb);
+                let end_val = self.compile_expression(end)?;
+                let pyobject_type = self.create_pyobject_type();
+                let var_val = self.builder
+                    .build_load(pyobject_type, ptr, var)
+                    .unwrap()
+                    .into_struct_value();
+
+                // Compare var < end
+                let var_payload = self.extract_payload(var_val);
+                let end_payload = self.extract_payload(end_val);
+                let cond_bool = self.builder
+                    .build_float_compare(FloatPredicate::OLT, var_payload, end_payload, "for_cond")
+                    .unwrap();
+
+                // Branch based on condition
+                self.builder
+                    .build_conditional_branch(cond_bool, loop_body_bb, loop_exit_bb)
+                    .unwrap();
+
+                // Build the loop body
+                self.builder.position_at_end(loop_body_bb);
+                for stmt in body {
+                    self.compile_statement(stmt, current_fn)?;
+                }
+                // Only add branch if current block doesn't already have a terminator
+                let current_block = self.builder.get_insert_block().unwrap();
+                if current_block.get_terminator().is_none() {
+                    self.builder.build_unconditional_branch(loop_incr_bb).unwrap();
+                }
+
+                // Build the increment block (var += 1)
+                self.builder.position_at_end(loop_incr_bb);
+                let var_val = self.builder
+                    .build_load(pyobject_type, ptr, var)
+                    .unwrap()
+                    .into_struct_value();
+                let var_payload = self.extract_payload(var_val);
+                let one = self.context.f64_type().const_float(1.0);
+                let new_payload = self.builder
+                    .build_float_add(var_payload, one, "for_incr")
+                    .unwrap();
+
+                // Preserve the tag from the loop variable
+                let tag = self.extract_tag(var_val);
+                let mut new_val = pyobject_type.get_undef();
+                new_val = self.builder
+                    .build_insert_value(new_val, tag, 0, "insert_tag")
+                    .unwrap()
+                    .into_struct_value();
+                new_val = self.builder
+                    .build_insert_value(new_val, new_payload, 1, "insert_payload")
+                    .unwrap()
+                    .into_struct_value();
+
+                self.builder.build_store(ptr, new_val).unwrap();
+                self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+
+                // Pop loop targets from the stack
+                self.loop_stack.pop();
+
+                // Continue building after the loop
+                self.builder.position_at_end(loop_exit_bb);
+            }
+            IRStmt::Break => {
+                // Branch to the exit block of the current loop
+                if let Some((_, break_target)) = self.loop_stack.last() {
+                    self.builder.build_unconditional_branch(*break_target).unwrap();
+                }
+                // Note: Any code after break in the same block is unreachable
+            }
+            IRStmt::Continue => {
+                // Branch to the continue target (loop condition or increment) of the current loop
+                if let Some((continue_target, _)) = self.loop_stack.last() {
+                    self.builder.build_unconditional_branch(*continue_target).unwrap();
+                }
+                // Note: Any code after continue in the same block is unreachable
             }
         }
         Ok(())
@@ -365,6 +480,10 @@ impl<'ctx> Compiler<'ctx> {
             IRExpr::Float(f) => {
                 let float_val = self.context.f64_type().const_float(*f);
                 Ok(self.create_pyobject_float(float_val))
+            }
+            IRExpr::Bool(b) => {
+                let bool_val = self.context.bool_type().const_int(*b as u64, false);
+                Ok(self.create_pyobject_bool(bool_val))
             }
             IRExpr::Variable(name) => {
                 let ptr = self.variables

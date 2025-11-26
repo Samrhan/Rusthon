@@ -6,49 +6,24 @@ Current limitations and unsupported features in Rusthon.
 
 ### Control Flow
 
-❌ **For Loops**
+⚠️ **For Loops - Limited Support**
 ```python
-# Not supported
-for i in range(10):
+# ✅ Supported: range-based for loops
+for i in range(10):        # ✅ Works
     print(i)
 
-# Use while instead
-i = 0
-while i < 10:
+for i in range(5, 15):     # ✅ Works
     print(i)
-    i += 1
-```
 
-❌ **Elif**
-```python
-# Not supported
-if x < 0:
-    print("negative")
-elif x == 0:
-    print("zero")
-else:
-    print("positive")
+# ❌ Not supported: iterating over collections
+for item in my_list:       # ❌ Lists not supported
+    print(item)
 
-# Use nested if instead
-if x < 0:
-    print("negative")
-else:
-    if x == 0:
-        print("zero")
-    else:
-        print("positive")
-```
+for char in "hello":       # ❌ String iteration not supported
+    print(char)
 
-❌ **Break/Continue**
-```python
-# Not supported
-while True:
-    if condition:
-        break
-
-# Use condition in while instead
-while not condition:
-    # loop body
+for i in range(0, 10, 2):  # ❌ Step parameter not supported
+    print(i)
 ```
 
 ❌ **Try/Except**
@@ -426,9 +401,8 @@ if y != 0:
 
 | Limitation | Workaround | Quality |
 |------------|------------|---------|
-| For loops | Use while | ✅ Good |
-| Elif | Nested if | ✅ Good |
-| Break/continue | Condition in while | ⚠️ Okay |
+| For with step | Use while | ✅ Good |
+| For over collections | N/A - collections not supported | ❌ N/A |
 | Lists | Separate variables | ❌ Poor |
 | String concat | Separate prints | ⚠️ Okay |
 | Default args | Sentinel values | ⚠️ Okay |
