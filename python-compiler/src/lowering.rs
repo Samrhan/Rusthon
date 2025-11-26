@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, IRExpr, IRStmt};
+use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt};
 use num_traits::ToPrimitive;
 use rustpython_parser::ast;
 use thiserror::Error;
@@ -11,8 +11,12 @@ pub enum LoweringError {
     UnsupportedExpression(ast::Expr),
     #[error("Unsupported operator: {0:?}")]
     UnsupportedOperator(ast::Operator),
+    #[error("Unsupported comparison operator: {0:?}")]
+    UnsupportedComparisonOperator(ast::CmpOp),
     #[error("Print statement expects 1 argument, but found {0}")]
     PrintArgumentMismatch(usize),
+    #[error("Comparison must have exactly one operator and two operands")]
+    InvalidComparison,
 }
 
 /// Lowers a `rustpython-parser` AST to the custom IR.
@@ -74,6 +78,46 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
             let expr = lower_expression(value)?;
             Ok(IRStmt::Return(expr))
         }
+        ast::Stmt::If(ast::StmtIf {
+            test,
+            body,
+            elif_else_clauses,
+            ..
+        }) => {
+            let condition = lower_expression(test)?;
+            let then_body: Result<Vec<IRStmt>, LoweringError> =
+                body.iter().map(lower_statement).collect();
+
+            // Handle else clause
+            let else_body = if !elif_else_clauses.is_empty() {
+                // For simplicity, only handle the first else clause (no elif support yet)
+                let else_clause = &elif_else_clauses[0];
+                if else_clause.test.is_some() {
+                    // This is an elif, not a plain else - not supported yet
+                    return Err(LoweringError::UnsupportedStatement(stmt.clone()));
+                }
+                let else_stmts: Result<Vec<IRStmt>, LoweringError> =
+                    else_clause.body.iter().map(lower_statement).collect();
+                else_stmts?
+            } else {
+                Vec::new()
+            };
+
+            Ok(IRStmt::If {
+                condition,
+                then_body: then_body?,
+                else_body,
+            })
+        }
+        ast::Stmt::While(ast::StmtWhile { test, body, .. }) => {
+            let condition = lower_expression(test)?;
+            let body: Result<Vec<IRStmt>, LoweringError> =
+                body.iter().map(lower_statement).collect();
+            Ok(IRStmt::While {
+                condition,
+                body: body?,
+            })
+        }
         _ => Err(LoweringError::UnsupportedStatement(stmt.clone())),
     }
 }
@@ -130,6 +174,35 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
             } else {
                 Err(LoweringError::UnsupportedExpression(expr.clone()))
             }
+        }
+        ast::Expr::Compare(ast::ExprCompare {
+            left,
+            ops,
+            comparators,
+            ..
+        }) => {
+            // For simplicity, only support single comparisons (e.g., a < b, not a < b < c)
+            if ops.len() != 1 || comparators.len() != 1 {
+                return Err(LoweringError::InvalidComparison);
+            }
+
+            let left = lower_expression(left)?;
+            let right = lower_expression(&comparators[0])?;
+            let op = match &ops[0] {
+                ast::CmpOp::Eq => CmpOp::Eq,
+                ast::CmpOp::NotEq => CmpOp::NotEq,
+                ast::CmpOp::Lt => CmpOp::Lt,
+                ast::CmpOp::Gt => CmpOp::Gt,
+                ast::CmpOp::LtE => CmpOp::LtE,
+                ast::CmpOp::GtE => CmpOp::GtE,
+                _ => return Err(LoweringError::UnsupportedComparisonOperator(ops[0].clone())),
+            };
+
+            Ok(IRExpr::Comparison {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            })
         }
         _ => Err(LoweringError::UnsupportedExpression(expr.clone())),
     }

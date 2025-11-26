@@ -1,8 +1,9 @@
-use crate::ast::{BinOp, IRExpr, IRStmt};
+use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::values::{BasicValueEnum, FunctionValue, FloatValue, PointerValue};
+use inkwell::FloatPredicate;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -98,6 +99,118 @@ impl<'ctx> Compiler<'ctx> {
             IRStmt::FunctionDef { .. } => {
                 // Function definitions are handled separately in compile_program
                 // This should not be reached during normal statement compilation
+            }
+            IRStmt::If { condition, then_body, else_body } => {
+                // Compile the condition expression
+                let cond_value = self.compile_expression(condition)?;
+
+                // Convert to i1 boolean for branching
+                let cond_bool = if cond_value.is_float_value() {
+                    // Convert float to i1: non-zero is true
+                    let zero = self.context.f64_type().const_float(0.0);
+                    self.builder
+                        .build_float_compare(
+                            FloatPredicate::ONE,  // Ordered and not equal
+                            cond_value.into_float_value(),
+                            zero,
+                            "ifcond"
+                        )
+                        .unwrap()
+                } else {
+                    // Already an integer (from comparison), convert to i1
+                    self.builder
+                        .build_int_truncate(
+                            cond_value.into_int_value(),
+                            self.context.bool_type(),
+                            "ifcond"
+                        )
+                        .unwrap()
+                };
+
+                // Create basic blocks for then, else, and merge
+                let then_bb = self.context.append_basic_block(current_fn, "then");
+                let else_bb = self.context.append_basic_block(current_fn, "else");
+                let merge_bb = self.context.append_basic_block(current_fn, "ifcont");
+
+                // Build conditional branch
+                self.builder
+                    .build_conditional_branch(cond_bool, then_bb, else_bb)
+                    .unwrap();
+
+                // Compile then block
+                self.builder.position_at_end(then_bb);
+                for stmt in then_body {
+                    self.compile_statement(stmt, current_fn)?;
+                }
+                // Only add branch if block doesn't already have a terminator (e.g., return)
+                if then_bb.get_terminator().is_none() {
+                    self.builder.build_unconditional_branch(merge_bb).unwrap();
+                }
+
+                // Compile else block
+                self.builder.position_at_end(else_bb);
+                for stmt in else_body {
+                    self.compile_statement(stmt, current_fn)?;
+                }
+                // Only add branch if block doesn't already have a terminator
+                if else_bb.get_terminator().is_none() {
+                    self.builder.build_unconditional_branch(merge_bb).unwrap();
+                }
+
+                // Continue building in the merge block
+                self.builder.position_at_end(merge_bb);
+            }
+            IRStmt::While { condition, body } => {
+                // Create basic blocks for loop condition, body, and exit
+                let loop_cond_bb = self.context.append_basic_block(current_fn, "loop_cond");
+                let loop_body_bb = self.context.append_basic_block(current_fn, "loop_body");
+                let loop_exit_bb = self.context.append_basic_block(current_fn, "loop_exit");
+
+                // Jump to the condition check
+                self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+
+                // Build the condition block
+                self.builder.position_at_end(loop_cond_bb);
+                let cond_value = self.compile_expression(condition)?;
+
+                // Convert to i1 boolean for branching
+                let cond_bool = if cond_value.is_float_value() {
+                    // Convert float to i1: non-zero is true
+                    let zero = self.context.f64_type().const_float(0.0);
+                    self.builder
+                        .build_float_compare(
+                            FloatPredicate::ONE,  // Ordered and not equal
+                            cond_value.into_float_value(),
+                            zero,
+                            "loopcond"
+                        )
+                        .unwrap()
+                } else {
+                    // Already an integer (from comparison), convert to i1
+                    self.builder
+                        .build_int_truncate(
+                            cond_value.into_int_value(),
+                            self.context.bool_type(),
+                            "loopcond"
+                        )
+                        .unwrap()
+                };
+
+                // Branch based on condition
+                self.builder
+                    .build_conditional_branch(cond_bool, loop_body_bb, loop_exit_bb)
+                    .unwrap();
+
+                // Build the loop body
+                self.builder.position_at_end(loop_body_bb);
+                for stmt in body {
+                    self.compile_statement(stmt, current_fn)?;
+                }
+                // Jump back to condition check
+                self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+
+                // Continue building after the loop
+                self.builder.position_at_end(loop_exit_bb);
             }
         }
         Ok(())
@@ -202,6 +315,34 @@ impl<'ctx> Compiler<'ctx> {
                     .unwrap();
 
                 Ok(value)
+            }
+            IRExpr::Comparison { op, left, right } => {
+                let lhs = self.compile_expression(left)?;
+                let rhs = self.compile_expression(right)?;
+
+                // Promote to float if either operand is float
+                let (lhs_float, rhs_float) = self.promote_to_float(lhs, rhs);
+
+                // Perform the comparison
+                let predicate = match op {
+                    CmpOp::Eq => FloatPredicate::OEQ,   // Ordered and equal
+                    CmpOp::NotEq => FloatPredicate::ONE, // Ordered and not equal
+                    CmpOp::Lt => FloatPredicate::OLT,   // Ordered and less than
+                    CmpOp::Gt => FloatPredicate::OGT,   // Ordered and greater than
+                    CmpOp::LtE => FloatPredicate::OLE,  // Ordered and less than or equal
+                    CmpOp::GtE => FloatPredicate::OGE,  // Ordered and greater than or equal
+                };
+
+                let cmp_result = self.builder
+                    .build_float_compare(predicate, lhs_float, rhs_float, "cmptmp")
+                    .unwrap();
+
+                // Convert i1 (boolean) result to f64 (0.0 or 1.0) for consistency
+                let result = self.builder
+                    .build_unsigned_int_to_float(cmp_result, self.context.f64_type(), "booltofloat")
+                    .unwrap();
+
+                Ok(result.into())
             }
         }
     }
