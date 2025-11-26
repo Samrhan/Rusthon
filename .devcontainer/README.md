@@ -1,44 +1,73 @@
-# Development Container for Rusthon
+# Development Container Setup
 
 This directory contains the development container configuration for the Rusthon Python-to-LLVM compiler project.
 
-## Prerequisites
+## Requirements
 
-- [Docker](https://www.docker.com/get-started)
-- [Visual Studio Code](https://code.visualstudio.com/)
-- [Remote - Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+The devcontainer includes:
+- **Rust toolchain** (latest stable)
+- **LLVM 18** with full development libraries
+- **Clang 18** compiler
+- **Polly** optimization library
+- **C++ standard libraries**
+- **CMake** and **Git**
 
-## What's Included
+## LLVM Dependencies
 
-The development container includes:
+The following LLVM 18 packages are installed:
+- `llvm-18` - LLVM core
+- `llvm-18-dev` - Development headers
+- `llvm-18-runtime` - Runtime libraries
+- `llvm-18-tools` - LLVM tools
+- `libllvm18` - LLVM shared library
+- `libpolly-18-dev` - Polly optimization library (required for linking)
+- `clang-18` - Clang compiler
+- `libclang-18-dev` - Clang development headers
+- `libc++-18-dev` - C++ standard library
+- `libc++abi-18-dev` - C++ ABI library
 
-- **Rust toolchain**: Latest stable Rust with `clippy` and `rustfmt`
-- **LLVM 18**: Full LLVM 18 installation with development headers
-- **Clang 18**: C/C++ compiler for LLVM wrapper compilation
-- **Build tools**: CMake, Git, and other essential development tools
+## Environment Variables
 
-## Using the Development Container
+The container sets:
+```bash
+LLVM_SYS_181_PREFIX=/usr/lib/llvm-18
+PATH=/usr/lib/llvm-18/bin:$PATH
+```
 
-### Option 1: VS Code (Recommended)
+## Rebuilding the Container
 
-1. Open the Rusthon repository in VS Code
-2. When prompted, click "Reopen in Container"
-   - Or use Command Palette (F1) → "Remote-Containers: Reopen in Container"
-3. Wait for the container to build (first time only, takes 2-5 minutes)
-4. Start developing!
+If you've updated the Dockerfile and need to rebuild:
 
-### Option 2: Manual Docker Build
+### In VS Code:
+1. Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac)
+2. Select "Dev Containers: Rebuild Container"
+3. Wait for the rebuild to complete
+
+### Using Docker CLI:
+```bash
+# From the project root
+docker build -t rusthon-dev .devcontainer/
+docker run -it -v $(pwd):/workspaces/Rusthon rusthon-dev
+```
+
+## Verification
+
+After the container is built, verify the installation:
 
 ```bash
-# From the repository root
-cd .devcontainer
-docker build -t rusthon-dev .
-docker run -it -v $(pwd)/..:/workspaces/Rusthon rusthon-dev
+# Check Rust
+rustc --version
+cargo --version
+
+# Check LLVM
+llvm-config-18 --version
+clang-18 --version
+
+# Check libraries
+llvm-config-18 --libs all
 ```
 
 ## Building the Project
-
-Once inside the container:
 
 ```bash
 cd python-compiler
@@ -46,55 +75,30 @@ cargo build
 cargo test
 ```
 
-## Environment Variables
-
-The following environment variables are pre-configured:
-
-- `LLVM_SYS_181_PREFIX=/usr/lib/llvm-18` - LLVM installation prefix
-- `PATH` includes `/usr/lib/llvm-18/bin` - LLVM tools in PATH
-
 ## Troubleshooting
 
-### LLVM not found
+### "could not find native static library \`Polly\`"
 
-If you see errors about missing LLVM headers, verify the installation:
+This means the Polly library is not installed. Ensure \`libpolly-18-dev\` is in the Dockerfile and rebuild the container.
 
+### "LLVM_SYS_181_PREFIX not set"
+
+The environment variable should be set automatically in the Dockerfile. If not, manually set it:
 ```bash
-llvm-config-18 --version
-ls -la /usr/lib/llvm-18/include/llvm-c/
-```
-
-### Container won't build
-
-Try rebuilding without cache:
-
-```bash
-docker build --no-cache -t rusthon-dev .
-```
-
-## Local Development (Without Container)
-
-If you prefer to develop locally, install these dependencies:
-
-### Ubuntu/Debian
-
-```bash
-sudo apt-get update
-sudo apt-get install -y llvm-18 llvm-18-dev llvm-18-runtime \
-    libllvm18 clang-18 libclang-18-dev cmake git
 export LLVM_SYS_181_PREFIX=/usr/lib/llvm-18
 ```
 
-### macOS
+### Library linking errors
 
+Check that all LLVM libraries are available:
 ```bash
-brew install llvm@18
-export LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)
+llvm-config-18 --libdir
+ls -la $(llvm-config-18 --libdir)
 ```
 
-### Arch Linux
+## Notes
 
-```bash
-sudo pacman -S llvm18 clang cmake git
-export LLVM_SYS_181_PREFIX=/usr/lib/llvm18
-```
+- The container uses Debian Bookworm as the base
+- LLVM 18 is specifically required for the \`llvm-sys\` crate compatibility
+- The \`inkwell\` crate uses LLVM 18 bindings
+- All Rust tools (clippy, rustfmt) are pre-installed
