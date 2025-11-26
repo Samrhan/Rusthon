@@ -81,7 +81,7 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
         ast::Stmt::If(ast::StmtIf {
             test,
             body,
-            elif_else_clauses,
+            orelse,
             ..
         }) => {
             let condition = lower_expression(test)?;
@@ -89,15 +89,18 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 body.iter().map(lower_statement).collect();
 
             // Handle else clause
-            let else_body = if !elif_else_clauses.is_empty() {
-                // For simplicity, only handle the first else clause (no elif support yet)
-                let else_clause = &elif_else_clauses[0];
-                if else_clause.test.is_some() {
-                    // This is an elif, not a plain else - not supported yet
-                    return Err(LoweringError::UnsupportedStatement(stmt.clone()));
+            let else_body = if !orelse.is_empty() {
+                // For simplicity, check if it's a plain else or elif
+                // If orelse contains an If statement, it's an elif
+                if orelse.len() == 1 {
+                    if let ast::Stmt::If(_) = &orelse[0] {
+                        // This is an elif - not supported yet
+                        return Err(LoweringError::UnsupportedStatement(stmt.clone()));
+                    }
                 }
+                // It's a plain else clause
                 let else_stmts: Result<Vec<IRStmt>, LoweringError> =
-                    else_clause.body.iter().map(lower_statement).collect();
+                    orelse.iter().map(lower_statement).collect();
                 else_stmts?
             } else {
                 Vec::new()

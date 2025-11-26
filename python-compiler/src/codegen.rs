@@ -2,7 +2,7 @@ use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::values::{BasicValueEnum, FunctionValue, FloatValue, IntValue, PointerValue, StructValue};
+use inkwell::values::{FunctionValue, FloatValue, IntValue, PointerValue, StructValue};
 use inkwell::FloatPredicate;
 use inkwell::types::StructType;
 use std::collections::HashMap;
@@ -689,7 +689,6 @@ impl<'ctx> Compiler<'ctx> {
 
         // Check the tag to determine print type
         let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
-        let float_tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
         let string_tag = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
 
         let is_int = self.builder
