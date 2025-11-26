@@ -238,3 +238,132 @@ fn test_unicode_string() {
     let llvm_ir = compiler.compile_program(&ir).unwrap();
     insta::assert_snapshot!(llvm_ir);
 }
+
+#[test]
+fn test_string_concatenation() {
+    let source = r#"
+s1 = "Hello"
+s2 = " World"
+s3 = s1 + s2
+print(s3)
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let llvm_ir = compiler.compile_program(&ir).unwrap();
+    insta::assert_snapshot!(llvm_ir);
+}
+
+#[test]
+fn test_string_concatenation_inline() {
+    let source = r#"print("Hello" + " " + "World")"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let llvm_ir = compiler.compile_program(&ir).unwrap();
+    insta::assert_snapshot!(llvm_ir);
+}
+
+#[test]
+fn test_string_concatenation_empty() {
+    let source = r#"
+s = "" + "Hello"
+print(s)
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let llvm_ir = compiler.compile_program(&ir).unwrap();
+    insta::assert_snapshot!(llvm_ir);
+}
+
+#[test]
+fn test_len_string() {
+    let source = r#"
+s = "Hello"
+n = len(s)
+print(n)
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let llvm_ir = compiler.compile_program(&ir).unwrap();
+    insta::assert_snapshot!(llvm_ir);
+}
+
+#[test]
+fn test_len_empty_string() {
+    let source = r#"
+s = ""
+print(len(s))
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let llvm_ir = compiler.compile_program(&ir).unwrap();
+    insta::assert_snapshot!(llvm_ir);
+}
+
+#[test]
+fn test_len_inline() {
+    let source = r#"print(len("Hello World"))"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let llvm_ir = compiler.compile_program(&ir).unwrap();
+    insta::assert_snapshot!(llvm_ir);
+}
+
+#[test]
+fn test_string_concat_and_len() {
+    let source = r#"
+s1 = "Hello"
+s2 = " World"
+s3 = s1 + s2
+print(s3)
+print(len(s3))
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let llvm_ir = compiler.compile_program(&ir).unwrap();
+    insta::assert_snapshot!(llvm_ir);
+}
+
+#[test]
+fn test_numeric_addition_still_works() {
+    let source = r#"
+x = 5 + 10
+print(x)
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let llvm_ir = compiler.compile_program(&ir).unwrap();
+    insta::assert_snapshot!(llvm_ir);
+}
+
+#[test]
+fn test_string_in_loop_with_concat() {
+    let source = r#"
+i = 0
+while i < 3:
+    s = "Iteration: " + "test"
+    print(s)
+    i += 1
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let llvm_ir = compiler.compile_program(&ir).unwrap();
+    insta::assert_snapshot!(llvm_ir);
+}

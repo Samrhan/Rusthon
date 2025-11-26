@@ -30,6 +30,8 @@ pub struct Compiler<'ctx> {
     functions: HashMap<String, FunctionValue<'ctx>>,
     // Stack of (continue_target, break_target) basic blocks for nested loops
     loop_stack: Vec<(inkwell::basic_block::BasicBlock<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)>,
+    // Arena for string allocations - stores pointers to allocated strings for cleanup
+    string_arena: Vec<PointerValue<'ctx>>,
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -43,6 +45,7 @@ impl<'ctx> Compiler<'ctx> {
             variables: HashMap::new(),
             functions: HashMap::new(),
             loop_stack: Vec::new(),
+            string_arena: Vec::new(),
         }
     }
 
@@ -216,6 +219,14 @@ impl<'ctx> Compiler<'ctx> {
 
         for stmt in top_level {
             self.compile_statement(stmt, main_fn)?;
+        }
+
+        // Cleanup: free all allocated strings from the arena
+        let free_fn = self.add_free();
+        for str_ptr in &self.string_arena {
+            self.builder
+                .build_call(free_fn, &[(*str_ptr).into()], "free_str")
+                .unwrap();
         }
 
         self.builder
@@ -471,7 +482,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn compile_expression(&self, expr: &IRExpr) -> Result<StructValue<'ctx>, CodeGenError> {
+    fn compile_expression(&mut self, expr: &IRExpr) -> Result<StructValue<'ctx>, CodeGenError> {
         match expr {
             IRExpr::Constant(n) => {
                 let int_val = self.context.i64_type().const_int(*n as u64, true);
@@ -501,6 +512,180 @@ impl<'ctx> Compiler<'ctx> {
             IRExpr::BinaryOp { op, left, right } => {
                 let lhs_obj = self.compile_expression(left)?;
                 let rhs_obj = self.compile_expression(right)?;
+
+                // Extract tags to check types
+                let lhs_tag = self.extract_tag(lhs_obj);
+                let rhs_tag = self.extract_tag(rhs_obj);
+                let string_tag_const = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
+
+                // Handle string concatenation for Add operator
+                if matches!(op, BinOp::Add) {
+                    let lhs_is_string = self.builder
+                        .build_int_compare(inkwell::IntPredicate::EQ, lhs_tag, string_tag_const, "lhs_is_string")
+                        .unwrap();
+                    let rhs_is_string = self.builder
+                        .build_int_compare(inkwell::IntPredicate::EQ, rhs_tag, string_tag_const, "rhs_is_string")
+                        .unwrap();
+                    let both_strings = self.builder
+                        .build_and(lhs_is_string, rhs_is_string, "both_strings")
+                        .unwrap();
+
+                    // Get current function for creating basic blocks
+                    let current_fn = self.builder
+                        .get_insert_block()
+                        .unwrap()
+                        .get_parent()
+                        .unwrap();
+
+                    let concat_block = self.context.append_basic_block(current_fn, "str_concat");
+                    let arithmetic_block = self.context.append_basic_block(current_fn, "arithmetic");
+                    let merge_block = self.context.append_basic_block(current_fn, "add_merge");
+
+                    // Branch based on whether both are strings
+                    self.builder
+                        .build_conditional_branch(both_strings, concat_block, arithmetic_block)
+                        .unwrap();
+
+                    // String concatenation block
+                    self.builder.position_at_end(concat_block);
+                    let lhs_str_ptr = self.extract_string_ptr(lhs_obj);
+                    let rhs_str_ptr = self.extract_string_ptr(rhs_obj);
+
+                    // Get lengths of both strings using strlen
+                    let strlen_fn = self.add_strlen();
+                    let lhs_len_result = self.builder
+                        .build_call(strlen_fn, &[lhs_str_ptr.into()], "lhs_len")
+                        .unwrap();
+                    let lhs_len = match lhs_len_result.try_as_basic_value() {
+                        inkwell::values::ValueKind::Basic(value) => value.into_int_value(),
+                        _ => {
+                            return Err(CodeGenError::UndefinedVariable(
+                                "strlen did not return a value".to_string()
+                            ))
+                        }
+                    };
+                    let rhs_len_result = self.builder
+                        .build_call(strlen_fn, &[rhs_str_ptr.into()], "rhs_len")
+                        .unwrap();
+                    let rhs_len = match rhs_len_result.try_as_basic_value() {
+                        inkwell::values::ValueKind::Basic(value) => value.into_int_value(),
+                        _ => {
+                            return Err(CodeGenError::UndefinedVariable(
+                                "strlen did not return a value".to_string()
+                            ))
+                        }
+                    };
+
+                    // Calculate total size (lhs_len + rhs_len + 1 for null terminator)
+                    let total_len = self.builder
+                        .build_int_add(lhs_len, rhs_len, "total_len")
+                        .unwrap();
+                    let total_size = self.builder
+                        .build_int_add(total_len, self.context.i64_type().const_int(1, false), "total_size")
+                        .unwrap();
+
+                    // Allocate memory for concatenated string
+                    let malloc_fn = self.add_malloc();
+                    let concat_ptr_result = self.builder
+                        .build_call(malloc_fn, &[total_size.into()], "malloc_concat")
+                        .unwrap();
+                    let concat_ptr = match concat_ptr_result.try_as_basic_value() {
+                        inkwell::values::ValueKind::Basic(value) => value.into_pointer_value(),
+                        _ => {
+                            return Err(CodeGenError::UndefinedVariable(
+                                "malloc did not return a value".to_string()
+                            ))
+                        }
+                    };
+
+                    // Copy first string
+                    let memcpy_fn = self.add_memcpy();
+                    self.builder
+                        .build_call(
+                            memcpy_fn,
+                            &[concat_ptr.into(), lhs_str_ptr.into(), lhs_len.into()],
+                            "memcpy_lhs",
+                        )
+                        .unwrap();
+
+                    // Copy second string (offset by lhs_len)
+                    let rhs_dest = unsafe {
+                        self.builder
+                            .build_gep(
+                                self.context.i8_type(),
+                                concat_ptr,
+                                &[lhs_len],
+                                "rhs_dest"
+                            )
+                            .unwrap()
+                    };
+                    // Copy rhs_len + 1 to include null terminator
+                    let rhs_copy_len = self.builder
+                        .build_int_add(rhs_len, self.context.i64_type().const_int(1, false), "rhs_copy_len")
+                        .unwrap();
+                    self.builder
+                        .build_call(
+                            memcpy_fn,
+                            &[rhs_dest.into(), rhs_str_ptr.into(), rhs_copy_len.into()],
+                            "memcpy_rhs",
+                        )
+                        .unwrap();
+
+                    // Track the allocated string in the arena
+                    self.string_arena.push(concat_ptr);
+
+                    // Create PyObject for concatenated string
+                    let concat_result = self.create_pyobject_string(concat_ptr);
+                    self.builder.build_unconditional_branch(merge_block).unwrap();
+
+                    // Arithmetic block (for non-string addition)
+                    self.builder.position_at_end(arithmetic_block);
+                    let lhs_payload = self.extract_payload(lhs_obj);
+                    let rhs_payload = self.extract_payload(rhs_obj);
+
+                    // Check if either operand is a float (tag == TYPE_TAG_FLOAT)
+                    let float_tag_const = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
+                    let lhs_is_float = self.builder
+                        .build_int_compare(inkwell::IntPredicate::EQ, lhs_tag, float_tag_const, "lhs_is_float")
+                        .unwrap();
+                    let rhs_is_float = self.builder
+                        .build_int_compare(inkwell::IntPredicate::EQ, rhs_tag, float_tag_const, "rhs_is_float")
+                        .unwrap();
+
+                    // If either is float, result should be float
+                    let result_is_float = self.builder
+                        .build_or(lhs_is_float, rhs_is_float, "result_is_float")
+                        .unwrap();
+
+                    let result_payload = self.builder.build_float_add(lhs_payload, rhs_payload, "addtmp").unwrap();
+
+                    // Select the result tag based on whether either operand is float
+                    let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
+                    let float_tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
+                    let result_tag = self.builder
+                        .build_select(result_is_float, float_tag, int_tag, "result_tag")
+                        .unwrap()
+                        .into_int_value();
+
+                    // Create result PyObject
+                    let pyobject_type = self.create_pyobject_type();
+                    let mut arithmetic_result = pyobject_type.get_undef();
+                    arithmetic_result = self.builder
+                        .build_insert_value(arithmetic_result, result_tag, 0, "insert_tag")
+                        .unwrap()
+                        .into_struct_value();
+                    arithmetic_result = self.builder
+                        .build_insert_value(arithmetic_result, result_payload, 1, "insert_payload")
+                        .unwrap()
+                        .into_struct_value();
+                    self.builder.build_unconditional_branch(merge_block).unwrap();
+
+                    // Merge block - phi node to select result
+                    self.builder.position_at_end(merge_block);
+                    let phi = self.builder.build_phi(pyobject_type, "add_result").unwrap();
+                    phi.add_incoming(&[(&concat_result, concat_block), (&arithmetic_result, arithmetic_block)]);
+                    return Ok(phi.as_basic_value().into_struct_value());
+                }
 
                 // Handle bitwise operations separately (they require integer operands)
                 match op {
@@ -641,6 +826,63 @@ impl<'ctx> Compiler<'ctx> {
                 // Wrap in PyObject (as float since input() reads floats)
                 Ok(self.create_pyobject_float(value))
             }
+            IRExpr::Len(arg) => {
+                let arg_obj = self.compile_expression(arg)?;
+                let arg_tag = self.extract_tag(arg_obj);
+
+                // Check if the argument is a string
+                let string_tag_const = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
+                let is_string = self.builder
+                    .build_int_compare(inkwell::IntPredicate::EQ, arg_tag, string_tag_const, "is_string")
+                    .unwrap();
+
+                // Get current function for creating basic blocks
+                let current_fn = self.builder
+                    .get_insert_block()
+                    .unwrap()
+                    .get_parent()
+                    .unwrap();
+
+                let string_len_block = self.context.append_basic_block(current_fn, "string_len");
+                let other_len_block = self.context.append_basic_block(current_fn, "other_len");
+                let merge_block = self.context.append_basic_block(current_fn, "len_merge");
+
+                // Branch based on type
+                self.builder
+                    .build_conditional_branch(is_string, string_len_block, other_len_block)
+                    .unwrap();
+
+                // String length block
+                self.builder.position_at_end(string_len_block);
+                let str_ptr = self.extract_string_ptr(arg_obj);
+                let strlen_fn = self.add_strlen();
+                let len_result = self.builder
+                    .build_call(strlen_fn, &[str_ptr.into()], "strlen")
+                    .unwrap();
+                let len_int = match len_result.try_as_basic_value() {
+                    inkwell::values::ValueKind::Basic(value) => value.into_int_value(),
+                    _ => {
+                        return Err(CodeGenError::UndefinedVariable(
+                            "strlen did not return a value".to_string()
+                        ))
+                    }
+                };
+                let string_len_result = self.create_pyobject_int(len_int);
+                self.builder.build_unconditional_branch(merge_block).unwrap();
+
+                // Other types - return 0 for now (could be extended for lists, etc.)
+                self.builder.position_at_end(other_len_block);
+                let zero_int = self.context.i64_type().const_int(0, false);
+                let other_len_result = self.create_pyobject_int(zero_int);
+                self.builder.build_unconditional_branch(merge_block).unwrap();
+
+                // Merge block
+                self.builder.position_at_end(merge_block);
+                let pyobject_type = self.create_pyobject_type();
+                let phi = self.builder.build_phi(pyobject_type, "len_result").unwrap();
+                phi.add_incoming(&[(&string_len_result, string_len_block), (&other_len_result, other_len_block)]);
+                Ok(phi.as_basic_value().into_struct_value())
+            }
             IRExpr::Comparison { op, left, right } => {
                 let lhs_obj = self.compile_expression(left)?;
                 let rhs_obj = self.compile_expression(right)?;
@@ -706,6 +948,9 @@ impl<'ctx> Compiler<'ctx> {
                         "memcpy_str",
                     )
                     .unwrap();
+
+                // Track the allocated string in the arena for cleanup
+                self.string_arena.push(str_ptr);
 
                 // Wrap the string pointer in a PyObject
                 Ok(self.create_pyobject_string(str_ptr))
@@ -882,6 +1127,28 @@ impl<'ctx> Compiler<'ctx> {
             .add_function("memcpy", memcpy_type, Some(Linkage::External))
     }
 
+    fn add_free(&self) -> FunctionValue<'ctx> {
+        if let Some(function) = self.module.get_function("free") {
+            return function;
+        }
+        let void_type = self.context.void_type();
+        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let free_type = void_type.fn_type(&[i8_ptr_type.into()], false);
+        self.module
+            .add_function("free", free_type, Some(Linkage::External))
+    }
+
+    fn add_strlen(&self) -> FunctionValue<'ctx> {
+        if let Some(function) = self.module.get_function("strlen") {
+            return function;
+        }
+        let size_type = self.context.i64_type();
+        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let strlen_type = size_type.fn_type(&[i8_ptr_type.into()], false);
+        self.module
+            .add_function("strlen", strlen_type, Some(Linkage::External))
+    }
+
     fn get_int_format_string(&self) -> PointerValue<'ctx> {
         self.builder
             .build_global_string_ptr("%d\n", "int_format_string")
@@ -945,7 +1212,7 @@ impl<'ctx> Compiler<'ctx> {
             .as_pointer_value()
     }
 
-    fn build_print_value(&self, pyobject: StructValue<'ctx>, with_newline: bool) {
+    fn build_print_value(&mut self, pyobject: StructValue<'ctx>, with_newline: bool) {
         let printf = self.add_printf();
 
         // Extract tag and payload

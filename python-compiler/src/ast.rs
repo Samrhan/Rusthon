@@ -57,6 +57,8 @@ pub enum IRExpr {
     },
     /// An input() call to read from stdin.
     Input,
+    /// A len() call to get the length of a value.
+    Len(Box<IRExpr>),
     /// A comparison operation.
     Comparison {
         op: CmpOp,

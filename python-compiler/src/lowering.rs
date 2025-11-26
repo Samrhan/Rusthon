@@ -212,6 +212,14 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                     }
                     return Ok(IRExpr::Input);
                 }
+                // Handle len() call
+                if id == "len" {
+                    if args.len() != 1 {
+                        return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
+                    }
+                    let arg = lower_expression(&args[0])?;
+                    return Ok(IRExpr::Len(Box::new(arg)));
+                }
                 let args: Result<Vec<IRExpr>, LoweringError> =
                     args.iter().map(lower_expression).collect();
                 Ok(IRExpr::Call {
