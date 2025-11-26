@@ -1,6 +1,6 @@
 ---
-source: tests/functions.rs
-assertion_line: 49
+source: tests/floats.rs
+assertion_line: 94
 expression: llvm_ir
 ---
 ; ModuleID = 'main'
@@ -8,23 +8,21 @@ source_filename = "main"
 
 @float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
 
-define double @calculate(double %0, double %1) {
+define double @multiply(double %0, double %1) {
 entry:
   %b = alloca double, align 8
   %a = alloca double, align 8
   store double %0, ptr %a, align 8
   store double %1, ptr %b, align 8
   %a1 = load double, ptr %a, align 8
-  %multmp = fmul double %a1, 2.000000e+00
   %b2 = load double, ptr %b, align 8
-  %multmp3 = fmul double %b2, 3.000000e+00
-  %addtmp = fadd double %multmp, %multmp3
-  ret double %addtmp
+  %multmp = fmul double %a1, %b2
+  ret double %multmp
 }
 
 define i32 @main() {
 entry:
-  %calltmp = call double @calculate(double 5.000000e+00, double 1.000000e+01)
+  %calltmp = call double @multiply(double 3.500000e+00, double 2.000000e+00)
   %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double %calltmp)
   ret i32 0
 }

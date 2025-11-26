@@ -1,6 +1,6 @@
 ---
-source: tests/arithmetic.rs
-assertion_line: 34
+source: tests/floats.rs
+assertion_line: 45
 expression: llvm_ir
 ---
 ; ModuleID = 'main'
@@ -10,7 +10,7 @@ source_filename = "main"
 
 define i32 @main() {
 entry:
-  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double 8.000000e+00)
+  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double 7.000000e+00)
   ret i32 0
 }
 

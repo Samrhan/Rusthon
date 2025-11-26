@@ -1,6 +1,6 @@
 ---
-source: tests/variables.rs
-assertion_line: 23
+source: tests/floats.rs
+assertion_line: 78
 expression: llvm_ir
 ---
 ; ModuleID = 'main'
@@ -12,12 +12,12 @@ define i32 @main() {
 entry:
   %y = alloca double, align 8
   %x = alloca double, align 8
-  store i64 10, ptr %x, align 4
+  store i64 5, ptr %x, align 4
+  store double 2.500000e+00, ptr %y, align 8
   %x1 = load double, ptr %x, align 8
-  %addtmp = fadd double %x1, 5.000000e+00
-  store double %addtmp, ptr %y, align 8
   %y2 = load double, ptr %y, align 8
-  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double %y2)
+  %addtmp = fadd double %x1, %y2
+  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double %addtmp)
   ret i32 0
 }
 

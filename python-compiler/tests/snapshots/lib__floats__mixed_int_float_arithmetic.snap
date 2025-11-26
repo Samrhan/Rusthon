@@ -1,5 +1,5 @@
 ---
-source: tests/arithmetic.rs
+source: tests/floats.rs
 assertion_line: 34
 expression: llvm_ir
 ---
@@ -10,7 +10,7 @@ source_filename = "main"
 
 define i32 @main() {
 entry:
-  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double 8.000000e+00)
+  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double 7.500000e+00)
   ret i32 0
 }
 
