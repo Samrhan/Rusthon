@@ -6,9 +6,9 @@ use thiserror::Error;
 #[derive(Debug, Error, PartialEq)]
 pub enum LoweringError {
     #[error("Unsupported statement: {0:?}")]
-    UnsupportedStatement(ast::Stmt),
+    UnsupportedStatement(Box<ast::Stmt>),
     #[error("Unsupported expression: {0:?}")]
-    UnsupportedExpression(ast::Expr),
+    UnsupportedExpression(Box<ast::Expr>),
     #[error("Unsupported operator: {0:?}")]
     UnsupportedOperator(ast::Operator),
     #[error("Unsupported comparison operator: {0:?}")]
@@ -39,11 +39,11 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                     }
                 }
             }
-            Err(LoweringError::UnsupportedStatement(stmt.clone()))
+            Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())))
         }
         ast::Stmt::Assign(ast::StmtAssign { targets, value, .. }) => {
             if targets.len() != 1 {
-                return Err(LoweringError::UnsupportedStatement(stmt.clone()));
+                return Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())));
             }
             if let ast::Expr::Name(ast::ExprName { id, .. }) = &targets[0] {
                 let value = lower_expression(value)?;
@@ -52,7 +52,7 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                     value,
                 })
             } else {
-                Err(LoweringError::UnsupportedStatement(stmt.clone()))
+                Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())))
             }
         }
         ast::Stmt::FunctionDef(ast::StmtFunctionDef {
@@ -74,7 +74,7 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
         ast::Stmt::Return(ast::StmtReturn { value, .. }) => {
             let value = value
                 .as_ref()
-                .ok_or_else(|| LoweringError::UnsupportedStatement(stmt.clone()))?;
+                .ok_or_else(|| LoweringError::UnsupportedStatement(Box::new(stmt.clone())))?;
             let expr = lower_expression(value)?;
             Ok(IRStmt::Return(expr))
         }
@@ -95,7 +95,7 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 if orelse.len() == 1 {
                     if let ast::Stmt::If(_) = &orelse[0] {
                         // This is an elif - not supported yet
-                        return Err(LoweringError::UnsupportedStatement(stmt.clone()));
+                        return Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())));
                     }
                 }
                 // It's a plain else clause
@@ -121,7 +121,7 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 body: body?,
             })
         }
-        _ => Err(LoweringError::UnsupportedStatement(stmt.clone())),
+        _ => Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone()))),
     }
 }
 
@@ -132,7 +132,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
             ast::Constant::Int(n) => Ok(IRExpr::Constant(n.to_i64().unwrap())),
             ast::Constant::Float(f) => Ok(IRExpr::Float(*f)),
             ast::Constant::Str(s) => Ok(IRExpr::StringLiteral(s.to_string())),
-            _ => Err(LoweringError::UnsupportedExpression(expr.clone())),
+            _ => Err(LoweringError::UnsupportedExpression(Box::new(expr.clone()))),
         },
         ast::Expr::Name(ast::ExprName { id, .. }) => Ok(IRExpr::Variable(id.to_string())),
         ast::Expr::BinOp(ast::ExprBinOp {
@@ -148,7 +148,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                 ast::Operator::Sub => BinOp::Sub,
                 ast::Operator::Mult => BinOp::Mul,
                 ast::Operator::Div => BinOp::Div,
-                _ => return Err(LoweringError::UnsupportedOperator(op.clone())),
+                _ => return Err(LoweringError::UnsupportedOperator(*op)),
             };
             Ok(IRExpr::BinaryOp {
                 op,
@@ -160,12 +160,12 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
             if let ast::Expr::Name(ast::ExprName { id, .. }) = func.as_ref() {
                 // Don't handle print here - it's handled as a statement
                 if id == "print" {
-                    return Err(LoweringError::UnsupportedExpression(expr.clone()));
+                    return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
                 }
                 // Handle input() call
                 if id == "input" {
                     if !args.is_empty() {
-                        return Err(LoweringError::UnsupportedExpression(expr.clone()));
+                        return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
                     }
                     return Ok(IRExpr::Input);
                 }
@@ -176,7 +176,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                     args: args?,
                 })
             } else {
-                Err(LoweringError::UnsupportedExpression(expr.clone()))
+                Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())))
             }
         }
         ast::Expr::Compare(ast::ExprCompare {
@@ -199,7 +199,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                 ast::CmpOp::Gt => CmpOp::Gt,
                 ast::CmpOp::LtE => CmpOp::LtE,
                 ast::CmpOp::GtE => CmpOp::GtE,
-                _ => return Err(LoweringError::UnsupportedComparisonOperator(ops[0].clone())),
+                _ => return Err(LoweringError::UnsupportedComparisonOperator(ops[0])),
             };
 
             Ok(IRExpr::Comparison {
@@ -208,6 +208,6 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                 right: Box::new(right),
             })
         }
-        _ => Err(LoweringError::UnsupportedExpression(expr.clone())),
+        _ => Err(LoweringError::UnsupportedExpression(Box::new(expr.clone()))),
     }
 }
