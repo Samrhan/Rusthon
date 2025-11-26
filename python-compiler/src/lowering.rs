@@ -128,6 +128,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
         ast::Expr::Constant(ast::ExprConstant { value, .. }) => match value {
             ast::Constant::Int(n) => Ok(IRExpr::Constant(n.to_i64().unwrap())),
             ast::Constant::Float(f) => Ok(IRExpr::Float(*f)),
+            ast::Constant::Str(s) => Ok(IRExpr::StringLiteral(s.to_string())),
             _ => Err(LoweringError::UnsupportedExpression(expr.clone())),
         },
         ast::Expr::Name(ast::ExprName { id, .. }) => Ok(IRExpr::Variable(id.to_string())),

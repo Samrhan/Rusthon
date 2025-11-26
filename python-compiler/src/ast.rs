@@ -46,6 +46,8 @@ pub enum IRExpr {
         left: Box<IRExpr>,
         right: Box<IRExpr>,
     },
+    /// A string literal.
+    StringLiteral(String),
 }
 
 /// A simplified Intermediate Representation for statements.

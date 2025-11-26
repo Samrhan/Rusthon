@@ -12,6 +12,7 @@ use thiserror::Error;
 const TYPE_TAG_INT: u8 = 0;
 const TYPE_TAG_FLOAT: u8 = 1;
 const TYPE_TAG_BOOL: u8 = 2;
+const TYPE_TAG_STRING: u8 = 3;
 
 #[derive(Debug, Error)]
 pub enum CodeGenError {
@@ -114,6 +115,54 @@ impl<'ctx> Compiler<'ctx> {
             .into_struct_value();
 
         pyobject
+    }
+
+    /// Creates a PyObject value from a string pointer
+    /// The pointer is stored in the payload as a pointer-sized integer cast to f64
+    fn create_pyobject_string(&self, ptr: PointerValue<'ctx>) -> StructValue<'ctx> {
+        let pyobject_type = self.create_pyobject_type();
+        let tag = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
+
+        // Convert pointer to integer, then to f64 for storage
+        // Note: This is a bit of a hack - we're storing a pointer as a float
+        // A better approach would use a union type, but this works for now
+        let ptr_as_int = self.builder
+            .build_ptr_to_int(ptr, self.context.i64_type(), "ptr_to_int")
+            .unwrap();
+        let ptr_as_f64 = self.builder
+            .build_unsigned_int_to_float(ptr_as_int, self.context.f64_type(), "ptr_to_f64")
+            .unwrap();
+
+        // Create the struct
+        let mut pyobject = pyobject_type.get_undef();
+        pyobject = self.builder
+            .build_insert_value(pyobject, tag, 0, "insert_tag")
+            .unwrap()
+            .into_struct_value();
+        pyobject = self.builder
+            .build_insert_value(pyobject, ptr_as_f64, 1, "insert_payload")
+            .unwrap()
+            .into_struct_value();
+
+        pyobject
+    }
+
+    /// Extracts a string pointer from a PyObject
+    /// Assumes the PyObject has a STRING tag
+    fn extract_string_ptr(&self, pyobject: StructValue<'ctx>) -> PointerValue<'ctx> {
+        let payload = self.extract_payload(pyobject);
+
+        // Convert f64 back to integer, then to pointer
+        let ptr_as_int = self.builder
+            .build_float_to_unsigned_int(payload, self.context.i64_type(), "f64_to_int")
+            .unwrap();
+        self.builder
+            .build_int_to_ptr(
+                ptr_as_int,
+                self.context.ptr_type(inkwell::AddressSpace::default()),
+                "int_to_ptr"
+            )
+            .unwrap()
     }
 
     /// Extracts the tag from a PyObject
@@ -440,6 +489,50 @@ impl<'ctx> Compiler<'ctx> {
                 // Return as PyObject with bool tag
                 Ok(self.create_pyobject_bool(cmp_result))
             }
+            IRExpr::StringLiteral(s) => {
+                // Calculate string length (including null terminator)
+                let str_len = s.len() + 1;
+                let size = self.context.i64_type().const_int(str_len as u64, false);
+
+                // Call malloc to allocate memory
+                let malloc_fn = self.add_malloc();
+                let malloc_result = self.builder
+                    .build_call(malloc_fn, &[size.into()], "malloc_str")
+                    .unwrap();
+
+                // Get the allocated pointer
+                use inkwell::values::ValueKind;
+                let str_ptr = match malloc_result.try_as_basic_value() {
+                    ValueKind::Basic(value) => value.into_pointer_value(),
+                    ValueKind::Instruction(_) => {
+                        return Err(CodeGenError::UndefinedVariable(
+                            "malloc did not return a value".to_string()
+                        ))
+                    }
+                };
+
+                // Create a global string constant for the literal
+                let global_str = self.builder
+                    .build_global_string_ptr(s, "str_literal")
+                    .unwrap();
+
+                // Use memcpy to copy the string to the allocated memory
+                let memcpy_fn = self.add_memcpy();
+                self.builder
+                    .build_call(
+                        memcpy_fn,
+                        &[
+                            str_ptr.into(),
+                            global_str.as_pointer_value().into(),
+                            size.into(),
+                        ],
+                        "memcpy_str",
+                    )
+                    .unwrap();
+
+                // Wrap the string pointer in a PyObject
+                Ok(self.create_pyobject_string(str_ptr))
+            }
         }
     }
 
@@ -536,6 +629,29 @@ impl<'ctx> Compiler<'ctx> {
             .add_function("scanf", scanf_type, Some(Linkage::External))
     }
 
+    fn add_malloc(&self) -> FunctionValue<'ctx> {
+        if let Some(function) = self.module.get_function("malloc") {
+            return function;
+        }
+        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let size_type = self.context.i64_type(); // size_t is typically i64
+        let malloc_type = i8_ptr_type.fn_type(&[size_type.into()], false);
+        self.module
+            .add_function("malloc", malloc_type, Some(Linkage::External))
+    }
+
+    fn add_memcpy(&self) -> FunctionValue<'ctx> {
+        if let Some(function) = self.module.get_function("memcpy") {
+            return function;
+        }
+        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let size_type = self.context.i64_type();
+        // void* memcpy(void* dest, const void* src, size_t n)
+        let memcpy_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into(), size_type.into()], false);
+        self.module
+            .add_function("memcpy", memcpy_type, Some(Linkage::External))
+    }
+
     fn get_int_format_string(&self) -> PointerValue<'ctx> {
         self.builder
             .build_global_string_ptr("%d\n", "int_format_string")
@@ -557,6 +673,13 @@ impl<'ctx> Compiler<'ctx> {
             .as_pointer_value()
     }
 
+    fn get_string_format_string(&self) -> PointerValue<'ctx> {
+        self.builder
+            .build_global_string_ptr("%s\n", "string_format_string")
+            .unwrap()
+            .as_pointer_value()
+    }
+
     fn build_print(&self, pyobject: StructValue<'ctx>) {
         let printf = self.add_printf();
 
@@ -564,46 +687,81 @@ impl<'ctx> Compiler<'ctx> {
         let tag = self.extract_tag(pyobject);
         let payload = self.extract_payload(pyobject);
 
-        // Check the tag to determine format string
+        // Check the tag to determine print type
         let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
         let float_tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
+        let string_tag = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
 
         let is_int = self.builder
             .build_int_compare(inkwell::IntPredicate::EQ, tag, int_tag, "is_int")
             .unwrap();
-        let is_float = self.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, tag, float_tag, "is_float")
+        let is_string = self.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, tag, string_tag, "is_string")
             .unwrap();
 
-        // Select format string based on tag
-        let int_fmt = self.get_int_format_string();
-        let float_fmt = self.get_float_format_string();
-
-        // For int, convert payload to i64; for float/bool, use payload as f64
-        let format_string = self.builder
-            .build_select(is_int, int_fmt, float_fmt, "format_select")
+        // Get current function for creating basic blocks
+        let current_fn = self.builder
+            .get_insert_block()
             .unwrap()
-            .into_pointer_value();
+            .get_parent()
+            .unwrap();
 
-        // Convert payload to int if tag is INT
-        let print_value: BasicValueEnum = if is_int.is_const() && is_int.get_zero_extended_constant().unwrap() == 1 {
-            // Statically known to be int
-            self.builder
-                .build_float_to_signed_int(payload, self.context.i64_type(), "payload_to_int")
-                .unwrap()
-                .into()
-        } else {
-            // Runtime check needed - for simplicity, always print as float
-            // (proper implementation would use phi nodes or conditional blocks)
-            payload.into()
-        };
+        // Create basic blocks for type dispatch
+        let check_int_block = self.context.append_basic_block(current_fn, "check_int");
+        let int_block = self.context.append_basic_block(current_fn, "print_int");
+        let float_block = self.context.append_basic_block(current_fn, "print_float");
+        let string_block = self.context.append_basic_block(current_fn, "print_string");
+        let end_block = self.context.append_basic_block(current_fn, "print_end");
 
+        // First, check if it's a string
+        self.builder
+            .build_conditional_branch(is_string, string_block, check_int_block)
+            .unwrap();
+
+        // If not string, check if it's int
+        self.builder.position_at_end(check_int_block);
+        self.builder
+            .build_conditional_branch(is_int, int_block, float_block)
+            .unwrap();
+
+        // Print int
+        self.builder.position_at_end(int_block);
+        let int_val = self.builder
+            .build_float_to_signed_int(payload, self.context.i64_type(), "to_int")
+            .unwrap();
         self.builder
             .build_call(
                 printf,
-                &[format_string.into(), print_value.into()],
-                "printf_call",
+                &[self.get_int_format_string().into(), int_val.into()],
+                "printf_int",
             )
             .unwrap();
+        self.builder.build_unconditional_branch(end_block).unwrap();
+
+        // Float block
+        self.builder.position_at_end(float_block);
+        self.builder
+            .build_call(
+                printf,
+                &[self.get_float_format_string().into(), payload.into()],
+                "printf_float",
+            )
+            .unwrap();
+        self.builder.build_unconditional_branch(end_block).unwrap();
+
+        // String block
+        self.builder.position_at_end(string_block);
+        let str_ptr = self.extract_string_ptr(pyobject);
+        self.builder
+            .build_call(
+                printf,
+                &[self.get_string_format_string().into(), str_ptr.into()],
+                "printf_string",
+            )
+            .unwrap();
+        self.builder.build_unconditional_branch(end_block).unwrap();
+
+        // Continue at end block
+        self.builder.position_at_end(end_block);
     }
 }
