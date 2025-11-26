@@ -63,12 +63,13 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
 
             // Extract default values from args
             let num_params = args.args.len();
-            let num_defaults = args.defaults.len();
+            let defaults_vec: Vec<_> = args.defaults().collect();
+            let num_defaults = defaults_vec.len();
             let mut defaults = vec![None; num_params];
 
             // Default values apply to the last N parameters
             let defaults_start = num_params - num_defaults;
-            for (i, default_expr) in args.defaults.iter().enumerate() {
+            for (i, default_expr) in defaults_vec.iter().enumerate() {
                 let lowered_default = lower_expression(default_expr)?;
                 defaults[defaults_start + i] = Some(lowered_default);
             }

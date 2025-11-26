@@ -858,7 +858,8 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             IRExpr::Call { func, args } => {
-                let function = self
+                // Clone the function value to avoid borrow checker issues
+                let function = *self
                     .functions
                     .get(func)
                     .ok_or_else(|| CodeGenError::UndefinedVariable(format!("function '{}'", func)))?;
@@ -870,7 +871,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Build the full argument list by filling in defaults
                 let mut compiled_args = Vec::new();
-                for (i, arg) in args.iter().enumerate() {
+                for arg in args.iter() {
                     let arg_pyobj = self.compile_expression(arg)?;
                     compiled_args.push(arg_pyobj.into());
                 }
@@ -889,7 +890,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 let call_result = self
                     .builder
-                    .build_call(*function, &compiled_args, "calltmp")
+                    .build_call(function, &compiled_args, "calltmp")
                     .unwrap();
 
                 // Extract the return value from the call (should be a PyObject)
