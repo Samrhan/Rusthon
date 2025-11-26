@@ -277,8 +277,9 @@ impl<'ctx> Compiler<'ctx> {
                 for stmt in then_body {
                     self.compile_statement(stmt, current_fn)?;
                 }
-                // Only add branch if block doesn't already have a terminator (e.g., return)
-                if then_bb.get_terminator().is_none() {
+                // Only add branch if current block doesn't already have a terminator (e.g., return)
+                let current_block = self.builder.get_insert_block().unwrap();
+                if current_block.get_terminator().is_none() {
                     self.builder.build_unconditional_branch(merge_bb).unwrap();
                 }
 
@@ -287,8 +288,9 @@ impl<'ctx> Compiler<'ctx> {
                 for stmt in else_body {
                     self.compile_statement(stmt, current_fn)?;
                 }
-                // Only add branch if block doesn't already have a terminator
-                if else_bb.get_terminator().is_none() {
+                // Only add branch if current block doesn't already have a terminator
+                let current_block = self.builder.get_insert_block().unwrap();
+                if current_block.get_terminator().is_none() {
                     self.builder.build_unconditional_branch(merge_bb).unwrap();
                 }
 
