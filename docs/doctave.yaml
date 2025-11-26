@@ -1,0 +1,41 @@
+---
+title: "Rusthon Documentation"
+port: 4001
+color: "#00d4ff"
+repository: "https://github.com/Samrhan/Rusthon"
+
+navigation:
+  - path: "/"
+  - path: "/getting-started"
+    children:
+      - "/getting-started/installation"
+      - "/getting-started/quick-start"
+      - "/getting-started/your-first-program"
+  - path: "/architecture"
+    children:
+      - "/architecture/overview"
+      - "/architecture/compilation-pipeline"
+      - "/architecture/type-system"
+      - "/architecture/memory-model"
+  - path: "/language-features"
+    children:
+      - "/language-features/data-types"
+      - "/language-features/operators"
+      - "/language-features/variables"
+      - "/language-features/functions"
+      - "/language-features/control-flow"
+      - "/language-features/input-output"
+  - path: "/implementation"
+    children:
+      - "/implementation/parser"
+      - "/implementation/lowering"
+      - "/implementation/code-generation"
+      - "/implementation/runtime"
+  - path: "/testing"
+    children:
+      - "/testing/overview"
+      - "/testing/running-tests"
+      - "/testing/test-coverage"
+  - path: "/contributing"
+  - path: "/limitations"
+  - path: "/roadmap"

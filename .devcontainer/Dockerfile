@@ -15,9 +15,18 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
         libc++abi-18-dev \
         cmake \
         git \
+        curl \
+        wget \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Doctave for documentation
+RUN curl -L https://github.com/Doctave/doctave/releases/download/0.4.2/doctave-0.4.2-x86_64-unknown-linux-gnu.tar.gz -o doctave.tar.gz \
+    && tar -xzf doctave.tar.gz \
+    && mv doctave /usr/local/bin/ \
+    && chmod +x /usr/local/bin/doctave \
+    && rm doctave.tar.gz
 
 # Set LLVM environment variables
 ENV LLVM_SYS_181_PREFIX=/usr/lib/llvm-18
