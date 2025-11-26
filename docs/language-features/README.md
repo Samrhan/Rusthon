@@ -17,7 +17,7 @@ Rusthon supports a useful subset of Python focused on:
 | **Data Types** |  |  |
 | Integers | ✅ Full | `/language-features/data-types#integers` |
 | Floats | ✅ Full | `/language-features/data-types#floats` |
-| Booleans | ✅ Implicit | `/language-features/data-types#booleans` |
+| Booleans | ✅ Full (True/False) | `/language-features/data-types#booleans` |
 | Strings | ✅ Literals only | `/language-features/data-types#strings` |
 | Lists | ❌ Not supported | See `/limitations` |
 | Dictionaries | ❌ Not supported | See `/limitations` |
@@ -28,10 +28,10 @@ Rusthon supports a useful subset of Python focused on:
 | Unary | ✅ Full (-, +, ~, not) | `/language-features/operators#unary` |
 | Augmented | ✅ Full (+=, -=, etc.) | `/language-features/operators#augmented` |
 | **Control Flow** |  |  |
-| If/Else | ✅ Full | `/language-features/control-flow#if-else` |
+| If/Else/Elif | ✅ Full | `/language-features/control-flow#if-else-elif` |
 | While | ✅ Full | `/language-features/control-flow#while` |
-| For loops | ❌ Not supported | See `/limitations` |
-| Break/Continue | ❌ Not supported | See `/limitations` |
+| For loops | ✅ Range-based | `/language-features/control-flow#for-loops` |
+| Break/Continue | ✅ Full | `/language-features/control-flow#break-continue` |
 | **Functions** |  |  |
 | Definition | ✅ Full | `/language-features/functions#definition` |
 | Parameters | ✅ Multiple | `/language-features/functions#parameters` |
@@ -63,12 +63,46 @@ print(factorial(5))  # 120
 
 ### Loops
 ```python
-i = 0
+# For loop with range
+for i in range(10):
+    print(i)
+
+# While loop
 sum = 0
+i = 0
 while i < 10:
     sum += i
     i += 1
 print(sum)  # 45
+```
+
+### Control Flow
+```python
+# elif support
+x = 5
+if x < 0:
+    print("negative")
+elif x == 0:
+    print("zero")
+else:
+    print("positive")
+
+# break and continue
+for i in range(10):
+    if i == 3:
+        continue  # skip 3
+    if i == 7:
+        break     # stop at 7
+    print(i)      # prints 0,1,2,4,5,6
+```
+
+### Boolean Literals
+```python
+x = True
+y = False
+
+if x and not y:
+    print("x is True and y is False")
 ```
 
 ### Bitwise
