@@ -1,0 +1,20 @@
+{
+  "name": "Rusthon Development Container",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb"
+      ],
+      "settings": {
+        "rust-analyzer.checkOnSave.command": "clippy"
+      }
+    }
+  },
+  "postCreateCommand": "rustc --version && cargo --version && llvm-config-18 --version",
+  "remoteUser": "vscode"
+}
