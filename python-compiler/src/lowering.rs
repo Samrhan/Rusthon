@@ -324,7 +324,7 @@ fn lower_binop(op: &ast::Operator) -> Result<BinOp, LoweringError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustpython_parser::ast;
+    use rustpython_parser::{ast, Parse};
 
     #[test]
     fn test_bool_literal() {
