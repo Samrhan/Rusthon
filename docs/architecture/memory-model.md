@@ -1,0 +1,460 @@
+# Memory Model
+
+Rusthon uses a simple stack-based memory model with heap allocation only for strings.
+
+## Memory Regions
+
+```
+┌─────────────────┐
+│      Stack      │  Variables, parameters, temporaries
+│  (auto-managed) │
+├─────────────────┤
+│      Heap       │  String literals only
+│   (malloc'ed)   │  ⚠️ Never freed (memory leak)
+└─────────────────┘
+```
+
+## Stack Allocation
+
+### Variables
+
+All variables are stack-allocated:
+
+```python
+x = 42
+y = 3.14
+```
+
+Generated LLVM:
+```llvm
+define i32 @main() {
+entry:
+  %x = alloca %PyObject        ; Allocate on stack
+  %y = alloca %PyObject        ; Allocate on stack
+
+  %x_val = insertvalue %PyObject { i8 0, double undef }, double 42.0, 1
+  store %PyObject %x_val, ptr %x
+
+  %y_val = insertvalue %PyObject { i8 1, double undef }, double 3.14, 1
+  store %PyObject %y_val, ptr %y
+
+  ret i32 0
+}
+```
+
+**Memory layout:**
+```
+Stack frame for main():
+  [%y] <- %PyObject (16 bytes)
+  [%x] <- %PyObject (16 bytes)
+  [return address]
+```
+
+### Function Parameters
+
+Parameters are passed by value, then stored on the stack:
+
+```python
+def add(a, b):
+    return a + b
+```
+
+Generated LLVM:
+```llvm
+define %PyObject @add(%PyObject %a, %PyObject %b) {
+entry:
+  %a_ptr = alloca %PyObject     ; Allocate on stack
+  %b_ptr = alloca %PyObject     ; Allocate on stack
+
+  store %PyObject %a, ptr %a_ptr   ; Store parameter
+  store %PyObject %b, ptr %b_ptr   ; Store parameter
+
+  ; ... function body ...
+
+  ret %PyObject %result
+}
+```
+
+**Memory layout:**
+```
+Stack frame for add():
+  [%b_ptr] <- %PyObject (16 bytes)
+  [%a_ptr] <- %PyObject (16 bytes)
+  [return address]
+Arguments passed in registers or caller's stack frame
+```
+
+### Temporaries
+
+Expression temporaries live on the stack:
+
+```python
+result = (a + b) * (c + d)
+```
+
+Generated LLVM:
+```llvm
+%temp1 = add %a, %b       ; Temporary in register/stack
+%temp2 = add %c, %d       ; Temporary in register/stack
+%result_val = mul %temp1, %temp2
+store %PyObject %result_val, ptr %result
+```
+
+## Heap Allocation
+
+### String Literals
+
+Strings are the **only** heap-allocated objects:
+
+```python
+print("Hello, World!")
+```
+
+Generated LLVM:
+```llvm
+@str_literal = private unnamed_addr constant [14 x i8] c"Hello, World!\00"
+
+define i32 @main() {
+entry:
+  ; Allocate heap memory
+  %str_ptr = call ptr @malloc(i64 14)
+
+  ; Copy string data
+  call void @memcpy(ptr %str_ptr, ptr @str_literal, i64 14, i1 false)
+
+  ; Create PyObject with string pointer
+  %ptr_int = ptrtoint ptr %str_ptr to i64
+  %ptr_double = sitofp i64 %ptr_int to double
+  %str_obj = insertvalue %PyObject { i8 3, double undef }, double %ptr_double, 1
+
+  ; Use string...
+
+  ; ⚠️ Memory is NEVER freed - this is a memory leak!
+
+  ret i32 0
+}
+```
+
+**Memory layout:**
+```
+Heap:
+  [H] "Hello, World!\0" (14 bytes, malloc'ed)
+       ↑
+       |
+Stack:
+  [str_obj] <- PyObject { tag: 3, payload: ptr_to_H }
+```
+
+## Memory Lifecycle
+
+### Variable Lifetime
+
+```python
+def compute():
+    x = 10        # x allocated
+    y = 20        # y allocated
+    z = x + y     # z allocated, x and y read
+    return z      # z returned, all deallocated
+```
+
+**Lifetime diagram:**
+```
+enter compute()
+  ├─ alloca x
+  ├─ alloca y
+  ├─ alloca z
+  ├─ compute...
+  ├─ return z (copy value)
+  └─ dealloca z, y, x (automatic)
+```
+
+### Function Call Memory
+
+```python
+def outer():
+    x = 10
+    y = inner(x)
+    return y
+
+def inner(a):
+    b = a * 2
+    return b
+```
+
+**Memory lifecycle:**
+```
+outer() frame:
+  x = 10
+  call inner(x):
+    inner() frame:
+      a = 10 (copy of x)
+      b = 20
+      return b (copy)
+    [inner() frame destroyed]
+  y = 20 (returned value)
+  return y
+[outer() frame destroyed]
+```
+
+## Stack Frame Layout
+
+### Example Program
+
+```python
+def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+result = factorial(5)
+```
+
+### Stack During Execution
+
+```
+Time: factorial(5)
+┌──────────────────┐
+│ n_ptr = 5        │ factorial(5)
+├──────────────────┤
+│ result_ptr       │ main()
+└──────────────────┘
+
+Time: factorial(4) called
+┌──────────────────┐
+│ n_ptr = 4        │ factorial(4)
+├──────────────────┤
+│ n_ptr = 5        │ factorial(5)
+├──────────────────┤
+│ result_ptr       │ main()
+└──────────────────┘
+
+Time: factorial(3) called
+┌──────────────────┐
+│ n_ptr = 3        │ factorial(3)
+├──────────────────┤
+│ n_ptr = 4        │ factorial(4)
+├──────────────────┤
+│ n_ptr = 5        │ factorial(5)
+├──────────────────┤
+│ result_ptr       │ main()
+└──────────────────┘
+
+... (continues to factorial(1))
+
+Time: returning from factorial(1)
+┌──────────────────┐
+│ return 1         │
+└──────────────────┘
+(frames unwind, values multiplied)
+```
+
+## Memory Safety
+
+### Guaranteed Safe
+
+✅ **No dangling pointers** - Variables can't outlive their scope
+✅ **No use-after-free** - Stack automatically deallocated
+✅ **No double-free** - No manual deallocation
+✅ **No buffer overflows** - No manual array indexing
+
+### Not Safe
+
+❌ **Memory leaks** - Strings never freed
+❌ **Stack overflow** - Deep recursion can exhaust stack
+❌ **Integer overflow** - No bounds checking on arithmetic
+
+## Performance Characteristics
+
+### Stack Allocation
+
+**Advantages:**
+- ⚡ Extremely fast (pointer increment)
+- ⚡ Predictable performance
+- ⚡ Cache-friendly (locality)
+- ⚡ No fragmentation
+- ⚡ Automatic deallocation
+
+**Disadvantages:**
+- 📏 Limited size (typically 1-8 MB)
+- 📏 Can't return local references
+- 📏 Large objects problematic
+
+### Heap Allocation (Strings)
+
+**Advantages:**
+- 📦 Unlimited size (within RAM)
+- 📦 Can outlive function
+
+**Disadvantages:**
+- 🐌 Slower than stack
+- 🐌 Fragmentation possible
+- 💧 Memory leaks (never freed)
+- 🐛 More complex
+
+## Comparison with Other Systems
+
+### CPython
+```
+Heap:
+  All PyObject* allocated on heap
+  Reference counting for deallocation
+  Garbage collector for cycles
+
+Stack:
+  Only C-level variables
+  Pointers to heap objects
+```
+
+### Rusthon
+```
+Stack:
+  All PyObject values (except strings)
+  Direct value storage
+
+Heap:
+  Only string data
+  Never freed (leak)
+```
+
+### Native Code (C)
+```
+Stack:
+  Local variables
+  Function parameters
+
+Heap:
+  Explicitly malloc/free
+  Programmer managed
+```
+
+## Design Decisions
+
+### Why Stack-Only?
+
+**Pros:**
+- ✅ Simplifies implementation
+- ✅ No GC needed
+- ✅ Predictable performance
+- ✅ No allocation overhead
+
+**Cons:**
+- ❌ Can't return heap objects
+- ❌ Limited to short-lived programs
+- ❌ Strings leak memory
+
+### Why Heap Strings?
+
+**Pros:**
+- ✅ Arbitrary length strings
+- ✅ String literals work
+
+**Cons:**
+- ❌ Memory leaks
+- ❌ Inconsistent with other types
+
+### Alternative: Arena Allocation
+
+Future improvement:
+```rust
+// Allocate from arena
+arena = Arena::new()
+str_ptr = arena.alloc(string_data)
+
+// Free entire arena at program end
+arena.destroy()  // Frees all strings at once
+```
+
+## Memory Usage Examples
+
+### Small Program
+```python
+x = 42
+print(x)
+```
+
+**Memory:**
+- Stack: 16 bytes (1 PyObject)
+- Heap: 0 bytes
+- Total: 16 bytes
+
+### Medium Program
+```python
+def fib(n):
+    if n <= 1:
+        return n
+    return fib(n-1) + fib(n-2)
+
+print(fib(10))
+```
+
+**Memory:**
+- Stack: ~176 bytes (11 frames × 16 bytes, approximate)
+- Heap: 0 bytes
+- Total: ~176 bytes (peak)
+
+### String Program
+```python
+print("Hello")
+print("World")
+print("Rust")
+```
+
+**Memory:**
+- Stack: ~48 bytes (temporaries)
+- Heap: 18 bytes (3 strings: 6+6+5+nulls, leaked)
+- Total: ~66 bytes
+
+## Debugging Memory Issues
+
+### Stack Overflow
+
+**Symptoms:**
+```
+Segmentation fault (core dumped)
+```
+
+**Cause:**
+- Too deep recursion
+- Too many local variables
+- Very large temporaries
+
+**Solution:**
+```python
+# Bad - deep recursion
+def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+factorial(100000)  # Stack overflow!
+
+# Good - iterative
+def factorial(n):
+    result = 1
+    i = 1
+    while i <= n:
+        result *= i
+        i += 1
+    return result
+
+factorial(100000)  # Works fine
+```
+
+### Memory Leaks (Strings)
+
+**Detection:**
+```bash
+valgrind ./program
+# Will report leaked string allocations
+```
+
+**Mitigation:**
+- Use strings sparingly
+- For long-running programs, consider rewriting without strings
+- Or implement arena allocation (future work)
+
+## Next Steps
+
+- [Type System](/architecture/type-system) - Understanding PyObject
+- [Code Generation](/implementation/code-generation) - How memory is managed
+- [Limitations](/limitations) - Memory-related limitations
