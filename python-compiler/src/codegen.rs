@@ -866,10 +866,9 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Get defaults for this function
                 let defaults = self.function_defaults.get(func).cloned().unwrap_or_default();
-                let num_params = defaults.len();
                 let num_provided_args = args.len();
 
-                // Build the full argument list by filling in defaults
+                // Compile provided arguments
                 let mut compiled_args = Vec::new();
                 for arg in args.iter() {
                     let arg_pyobj = self.compile_expression(arg)?;
@@ -877,14 +876,17 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 // Add default arguments for missing parameters
-                for i in num_provided_args..num_params {
-                    if let Some(default_expr) = &defaults[i] {
-                        let default_pyobj = self.compile_expression(default_expr)?;
-                        compiled_args.push(default_pyobj.into());
-                    } else {
-                        return Err(CodeGenError::UndefinedVariable(
-                            format!("Missing required argument {} for function '{}'", i, func)
-                        ));
+                // Only iterate through defaults that correspond to parameters we didn't provide
+                if num_provided_args < defaults.len() {
+                    for i in num_provided_args..defaults.len() {
+                        if let Some(default_expr) = &defaults[i] {
+                            let default_pyobj = self.compile_expression(default_expr)?;
+                            compiled_args.push(default_pyobj.into());
+                        } else {
+                            return Err(CodeGenError::UndefinedVariable(
+                                format!("Missing required argument {} for function '{}'", i, func)
+                            ));
+                        }
                     }
                 }
 
@@ -1419,16 +1421,12 @@ impl<'ctx> Compiler<'ctx> {
         // Check the tag to determine print type
         let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
         let string_tag = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
-        let list_tag = self.context.i8_type().const_int(TYPE_TAG_LIST as u64, false);
 
         let is_int = self.builder
             .build_int_compare(inkwell::IntPredicate::EQ, tag, int_tag, "is_int")
             .unwrap();
         let is_string = self.builder
             .build_int_compare(inkwell::IntPredicate::EQ, tag, string_tag, "is_string")
-            .unwrap();
-        let is_list = self.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, tag, list_tag, "is_list")
             .unwrap();
 
         // Get current function for creating basic blocks
@@ -1439,21 +1437,13 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap();
 
         // Create basic blocks for type dispatch
-        let check_string_block = self.context.append_basic_block(current_fn, "check_string");
         let check_int_block = self.context.append_basic_block(current_fn, "check_int");
         let int_block = self.context.append_basic_block(current_fn, "print_int");
         let float_block = self.context.append_basic_block(current_fn, "print_float");
         let string_block = self.context.append_basic_block(current_fn, "print_string");
-        let list_block = self.context.append_basic_block(current_fn, "print_list");
         let end_block = self.context.append_basic_block(current_fn, "print_end");
 
-        // First, check if it's a list
-        self.builder
-            .build_conditional_branch(is_list, list_block, check_string_block)
-            .unwrap();
-
-        // If not list, check if it's a string
-        self.builder.position_at_end(check_string_block);
+        // First, check if it's a string
         self.builder
             .build_conditional_branch(is_string, string_block, check_int_block)
             .unwrap();
@@ -1513,109 +1503,6 @@ impl<'ctx> Compiler<'ctx> {
                 &[string_format.into(), str_ptr.into()],
                 "printf_string",
             )
-            .unwrap();
-        self.builder.build_unconditional_branch(end_block).unwrap();
-
-        // List block
-        self.builder.position_at_end(list_block);
-        let (list_ptr, list_len) = self.extract_list_ptr_and_len(pyobject);
-
-        // Print opening bracket
-        let open_bracket = self.builder.build_global_string_ptr("[", "open_bracket").unwrap();
-        self.builder
-            .build_call(printf, &[open_bracket.as_pointer_value().into()], "print_open")
-            .unwrap();
-
-        // Loop through elements and print them
-        let pyobject_type = self.create_pyobject_type();
-        let zero = self.context.i64_type().const_zero();
-        let one = self.context.i64_type().const_int(1, false);
-
-        // Create loop blocks
-        let loop_cond = self.context.append_basic_block(current_fn, "list_loop_cond");
-        let loop_body = self.context.append_basic_block(current_fn, "list_loop_body");
-        let loop_inc = self.context.append_basic_block(current_fn, "list_loop_inc");
-        let loop_end = self.context.append_basic_block(current_fn, "list_loop_end");
-
-        // Allocate counter variable
-        let counter_ptr = self.builder
-            .build_alloca(self.context.i64_type(), "counter")
-            .unwrap();
-        self.builder.build_store(counter_ptr, zero).unwrap();
-
-        self.builder.build_unconditional_branch(loop_cond).unwrap();
-
-        // Loop condition: counter < list_len
-        self.builder.position_at_end(loop_cond);
-        let counter = self.builder
-            .build_load(self.context.i64_type(), counter_ptr, "counter_val")
-            .unwrap()
-            .into_int_value();
-        let cond = self.builder
-            .build_int_compare(inkwell::IntPredicate::ULT, counter, list_len, "list_cond")
-            .unwrap();
-        self.builder
-            .build_conditional_branch(cond, loop_body, loop_end)
-            .unwrap();
-
-        // Loop body: print element
-        self.builder.position_at_end(loop_body);
-
-        // Load element at counter
-        let elem_ptr = unsafe {
-            self.builder
-                .build_in_bounds_gep(pyobject_type, list_ptr, &[counter], "list_elem_ptr")
-                .unwrap()
-        };
-        let elem = self.builder
-            .build_load(pyobject_type, elem_ptr, "list_elem")
-            .unwrap()
-            .into_struct_value();
-
-        // Print element (no newline)
-        self.build_print_value(elem, false);
-
-        // Print comma and space if not last element
-        let next_counter = self.builder
-            .build_int_add(counter, one, "next_counter")
-            .unwrap();
-        let is_last = self.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, next_counter, list_len, "is_last")
-            .unwrap();
-
-        let print_comma_block = self.context.append_basic_block(current_fn, "print_comma");
-        self.builder
-            .build_conditional_branch(is_last, loop_inc, print_comma_block)
-            .unwrap();
-
-        self.builder.position_at_end(print_comma_block);
-        let comma = self.builder.build_global_string_ptr(", ", "comma").unwrap();
-        self.builder
-            .build_call(printf, &[comma.as_pointer_value().into()], "print_comma_call")
-            .unwrap();
-        self.builder.build_unconditional_branch(loop_inc).unwrap();
-
-        // Loop increment
-        self.builder.position_at_end(loop_inc);
-        let counter = self.builder
-            .build_load(self.context.i64_type(), counter_ptr, "counter_val")
-            .unwrap()
-            .into_int_value();
-        let next_counter = self.builder
-            .build_int_add(counter, one, "next_counter")
-            .unwrap();
-        self.builder.build_store(counter_ptr, next_counter).unwrap();
-        self.builder.build_unconditional_branch(loop_cond).unwrap();
-
-        // After loop, print closing bracket
-        self.builder.position_at_end(loop_end);
-        let close_bracket = if with_newline {
-            self.builder.build_global_string_ptr("]\n", "close_bracket").unwrap()
-        } else {
-            self.builder.build_global_string_ptr("]", "close_bracket").unwrap()
-        };
-        self.builder
-            .build_call(printf, &[close_bracket.as_pointer_value().into()], "print_close")
             .unwrap();
         self.builder.build_unconditional_branch(end_block).unwrap();
 
