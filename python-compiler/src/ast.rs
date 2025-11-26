@@ -20,6 +20,11 @@ pub enum IRExpr {
         left: Box<IRExpr>,
         right: Box<IRExpr>,
     },
+    /// A function call.
+    Call {
+        func: String,
+        args: Vec<IRExpr>,
+    },
 }
 
 /// A simplified Intermediate Representation for statements.
@@ -29,4 +34,12 @@ pub enum IRStmt {
     Print(IRExpr),
     /// An assignment statement.
     Assign { target: String, value: IRExpr },
+    /// A function definition.
+    FunctionDef {
+        name: String,
+        params: Vec<String>,
+        body: Vec<IRStmt>,
+    },
+    /// A return statement.
+    Return(IRExpr),
 }

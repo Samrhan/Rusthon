@@ -1,0 +1,94 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ main, claude/* ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  LLVM_SYS_181_PREFIX: /usr/lib/llvm-18
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install LLVM 18
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm-18 llvm-18-dev llvm-18-runtime \
+          libllvm18 clang-18 libclang-18-dev cmake
+        llvm-config-18 --version
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: python-compiler/target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Check formatting
+      run: |
+        cd python-compiler
+        cargo fmt --all -- --check
+
+    - name: Run clippy
+      run: |
+        cd python-compiler
+        cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build
+      run: |
+        cd python-compiler
+        cargo build --verbose
+
+    - name: Run tests
+      run: |
+        cd python-compiler
+        cargo test --verbose
+
+  check-docs:
+    name: Documentation
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install LLVM 18
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm-18 llvm-18-dev llvm-18-runtime \
+          libllvm18 clang-18 libclang-18-dev
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Check documentation
+      run: |
+        cd python-compiler
+        cargo doc --no-deps --all-features
+      env:
+        RUSTDOCFLAGS: -D warnings
