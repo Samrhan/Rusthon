@@ -19,7 +19,7 @@ Rusthon supports a useful subset of Python focused on:
 | Floats | ✅ Full | `/language-features/data-types#floats` |
 | Booleans | ✅ Full (True/False) | `/language-features/data-types#booleans` |
 | Strings | ✅ Concatenation, len() | `/language-features/data-types#strings` |
-| Lists | ❌ Not supported | See `/limitations` |
+| Lists | ✅ Fixed-size, indexing | `/language-features/data-types#lists` |
 | Dictionaries | ❌ Not supported | See `/limitations` |
 | **Operators** |  |  |
 | Arithmetic | ✅ Full (+, -, *, /, %) | `/language-features/operators#arithmetic` |
@@ -37,7 +37,7 @@ Rusthon supports a useful subset of Python focused on:
 | Parameters | ✅ Multiple | `/language-features/functions#parameters` |
 | Return | ✅ Full | `/language-features/functions#return` |
 | Recursion | ✅ Full | `/language-features/functions#recursion` |
-| Default args | ❌ Not supported | See `/limitations` |
+| Default args | ✅ Full | `/language-features/functions#default-arguments` |
 | **I/O** |  |  |
 | print() | ✅ Full | `/language-features/input-output#print` |
 | input() | ✅ Numbers only | `/language-features/input-output#input` |
@@ -128,6 +128,47 @@ s1 = "Hello"
 s2 = " World"
 combined = s1 + s2
 print(len(combined))  # 11
+```
+
+### Lists
+```python
+# List literals
+numbers = [1, 2, 3, 4, 5]
+mixed = [1, 2.5, True, "hello"]
+
+# Indexing
+print(numbers[0])  # 1
+print(numbers[2])  # 3
+
+# Note: Printing entire lists is temporarily disabled
+# print(numbers)   # NOT SUPPORTED
+
+# With expressions
+a = 10
+b = 20
+computed = [a, a + b, b * 2]
+element = computed[0]
+print(element)     # 10
+```
+
+### Default Arguments
+```python
+# Functions with default parameters
+def greet(name, greeting="Hello"):
+    print(greeting + ", " + name)
+
+greet("Alice")           # "Hello, Alice"
+greet("Bob", "Hi")       # "Hi, Bob"
+
+# Multiple defaults
+def power(base, exponent=2):
+    result = 1
+    for i in range(exponent):
+        result = result * base
+    return result
+
+print(power(5))          # 25 (5^2)
+print(power(5, 3))       # 125 (5^3)
 ```
 
 ## Documentation Sections

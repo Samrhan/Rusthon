@@ -60,11 +60,26 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 .iter()
                 .map(|arg| arg.def.arg.to_string())
                 .collect();
+
+            // Extract default values from args
+            let num_params = args.args.len();
+            let defaults_vec: Vec<_> = args.defaults().collect();
+            let num_defaults = defaults_vec.len();
+            let mut defaults = vec![None; num_params];
+
+            // Default values apply to the last N parameters
+            let defaults_start = num_params - num_defaults;
+            for (i, default_expr) in defaults_vec.iter().enumerate() {
+                let lowered_default = lower_expression(default_expr)?;
+                defaults[defaults_start + i] = Some(lowered_default);
+            }
+
             let body: Result<Vec<IRStmt>, LoweringError> =
                 body.iter().map(lower_statement).collect();
             Ok(IRStmt::FunctionDef {
                 name: name.to_string(),
                 params,
+                defaults,
                 body: body?,
             })
         }
@@ -272,6 +287,19 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                 operand: Box::new(operand),
             })
         }
+        ast::Expr::List(ast::ExprList { elts, .. }) => {
+            let elements: Result<Vec<IRExpr>, LoweringError> =
+                elts.iter().map(lower_expression).collect();
+            Ok(IRExpr::List(elements?))
+        }
+        ast::Expr::Subscript(ast::ExprSubscript { value, slice, .. }) => {
+            let list = lower_expression(value)?;
+            let index = lower_expression(slice)?;
+            Ok(IRExpr::Index {
+                list: Box::new(list),
+                index: Box::new(index),
+            })
+        }
         _ => Err(LoweringError::UnsupportedExpression(Box::new(expr.clone()))),
     }
 }
@@ -296,7 +324,7 @@ fn lower_binop(op: &ast::Operator) -> Result<BinOp, LoweringError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustpython_parser::ast;
+    use rustpython_parser::{ast, Parse};
 
     #[test]
     fn test_bool_literal() {

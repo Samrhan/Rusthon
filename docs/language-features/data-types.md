@@ -287,18 +287,142 @@ y = 10 + 5         # 15 (INT)
 z = 10 > 5         # True (BOOL)
 ```
 
+## Lists
+
+Fixed-size lists for storing collections of values.
+
+### Literals
+
+```python
+numbers = [1, 2, 3]
+mixed = [1, 2.5, 3]
+empty = []
+```
+
+### Indexing
+
+Access individual elements using zero-based indexing:
+
+```python
+numbers = [10, 20, 30, 40]
+first = numbers[0]   # 10
+second = numbers[1]  # 20
+last = numbers[3]    # 40
+```
+
+### Usage
+
+Lists can be:
+- Assigned to variables
+- Indexed with integers
+- ~~Printed with `print()`~~ (temporarily disabled)
+- Created with mixed types (int, float, bool, string)
+- Passed to functions
+
+```python
+# Basic usage
+x = [1, 2, 3]
+# print(x)  # NOT SUPPORTED - list printing temporarily disabled
+
+# Indexing works!
+value = x[1]
+print(value)  # 2
+
+# Mixed types
+mixed = [1, 2.5, True, "hello"]
+first = mixed[0]
+print(first)  # 1
+```
+
+### Memory Management
+
+Lists are heap-allocated with automatic memory management:
+- List data is allocated with `malloc()`
+- Fixed size (cannot grow or shrink after creation)
+- Pointers are tracked for cleanup
+- Each list element is a PyObject
+
+**Implementation details:**
+- Lists are stored as contiguous arrays of PyObject structs
+- List pointer and length are encoded in a single PyObject
+- Maximum list size: 65,535 elements
+- Supports 48-bit pointers (common on x86-64)
+
+### Operations
+
+✅ **Supported operations:**
+```python
+# Creation
+x = [1, 2, 3]                     # ✅ Supported
+
+# Indexing
+value = x[0]                      # ✅ Supported
+print(value)                      # ✅ Supported (prints the element)
+
+# Mixed types
+mixed = [1, 2.5, "hello", True]   # ✅ Supported
+element = mixed[2]                # ✅ Supported
+print(element)                    # ✅ Supported (prints "hello")
+```
+
+❌ **Not yet supported:**
+```python
+# Printing lists (temporarily disabled)
+print([1, 2, 3])                  # ❌ Not supported (causes issues)
+print(x)                          # ❌ Not supported for list variables
+
+# Methods
+x.append(4)                       # ❌ Not supported
+
+# Slicing
+subset = x[1:3]                   # ❌ Not supported
+
+# Iteration
+for item in x:                    # ❌ Not supported
+    print(item)
+
+# List comprehensions
+squares = [x*x for x in range(5)] # ❌ Not supported
+
+# Negative indexing
+last = x[-1]                      # ❌ Not supported
+
+# Assignment to index
+x[0] = 10                         # ❌ Not supported
+
+# Length function
+n = len(x)                        # ❌ Not supported (yet)
+```
+
+### Examples
+
+```python
+# Simple list
+numbers = [1, 2, 3, 4, 5]
+# print(numbers)     # NOT SUPPORTED - list printing disabled
+print(numbers[2])    # 3 - indexing works!
+
+# List with expressions
+a = 5
+b = 10
+computed = [a, a + b, b * 2]
+first = computed[0]
+print(first)         # 5
+
+# Passing to functions
+def first_element(lst):
+    return lst[0]
+
+result = first_element([10, 20, 30])
+print(result)        # 10
+```
+
 ## Not Supported
 
 ### ❌ Complex Numbers
 
 ```python
 z = 3 + 4j  # ❌ Not supported
-```
-
-### ❌ Lists
-
-```python
-numbers = [1, 2, 3]  # ❌ Not supported
 ```
 
 ### ❌ Tuples

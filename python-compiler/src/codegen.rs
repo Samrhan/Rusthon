@@ -13,6 +13,7 @@ const TYPE_TAG_INT: u8 = 0;
 const TYPE_TAG_FLOAT: u8 = 1;
 const TYPE_TAG_BOOL: u8 = 2;
 const TYPE_TAG_STRING: u8 = 3;
+const TYPE_TAG_LIST: u8 = 4;
 
 #[derive(Debug, Error)]
 pub enum CodeGenError {
@@ -28,6 +29,7 @@ pub struct Compiler<'ctx> {
     module: Module<'ctx>,
     variables: HashMap<String, PointerValue<'ctx>>,
     functions: HashMap<String, FunctionValue<'ctx>>,
+    function_defaults: HashMap<String, Vec<Option<IRExpr>>>,
     // Stack of (continue_target, break_target) basic blocks for nested loops
     loop_stack: Vec<(inkwell::basic_block::BasicBlock<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)>,
     // Arena for string allocations - stores pointers to allocated strings for cleanup
@@ -44,6 +46,7 @@ impl<'ctx> Compiler<'ctx> {
             module,
             variables: HashMap::new(),
             functions: HashMap::new(),
+            function_defaults: HashMap::new(),
             loop_stack: Vec::new(),
             string_arena: Vec::new(),
         }
@@ -171,6 +174,90 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap()
     }
 
+    /// Creates a PyObject value from a list pointer and length
+    /// The pointer is stored in the payload as a pointer-sized integer cast to f64
+    /// The length is encoded in the upper 32 bits of the pointer
+    fn create_pyobject_list(&self, ptr: PointerValue<'ctx>, len: usize) -> StructValue<'ctx> {
+        let pyobject_type = self.create_pyobject_type();
+        let tag = self.context.i8_type().const_int(TYPE_TAG_LIST as u64, false);
+
+        // Encode both pointer and length in the payload
+        // We'll use a simple encoding: store the pointer as an int, then encode length separately
+        // For simplicity, we'll just store the pointer and track length elsewhere if needed
+        // For now, we'll store the length in a separate allocation and store that pointer
+
+        // Allocate space for length (i64)
+        let len_alloca = self.builder
+            .build_alloca(self.context.i64_type(), "list_len_tmp")
+            .unwrap();
+        let len_val = self.context.i64_type().const_int(len as u64, false);
+        self.builder.build_store(len_alloca, len_val).unwrap();
+
+        // Create a struct to hold both pointer and length
+        // We'll pack them into a single i64: lower 48 bits for pointer, upper 16 bits for length
+        // This limits lists to 65535 elements and pointers to 48 bits (common on x86-64)
+        let ptr_as_int = self.builder
+            .build_ptr_to_int(ptr, self.context.i64_type(), "ptr_to_int")
+            .unwrap();
+
+        let len_i64 = self.context.i64_type().const_int(len as u64, false);
+        let len_shifted = self.builder
+            .build_left_shift(len_i64, self.context.i64_type().const_int(48, false), "len_shift")
+            .unwrap();
+
+        let packed = self.builder
+            .build_or(ptr_as_int, len_shifted, "packed")
+            .unwrap();
+
+        let packed_as_f64 = self.builder
+            .build_unsigned_int_to_float(packed, self.context.f64_type(), "packed_to_f64")
+            .unwrap();
+
+        // Create the struct
+        let mut pyobject = pyobject_type.get_undef();
+        pyobject = self.builder
+            .build_insert_value(pyobject, tag, 0, "insert_tag")
+            .unwrap()
+            .into_struct_value();
+        pyobject = self.builder
+            .build_insert_value(pyobject, packed_as_f64, 1, "insert_payload")
+            .unwrap()
+            .into_struct_value();
+
+        pyobject
+    }
+
+    /// Extracts a list pointer and length from a PyObject
+    /// Assumes the PyObject has a LIST tag
+    fn extract_list_ptr_and_len(&self, pyobject: StructValue<'ctx>) -> (PointerValue<'ctx>, IntValue<'ctx>) {
+        let payload = self.extract_payload(pyobject);
+
+        // Convert f64 back to integer
+        let packed = self.builder
+            .build_float_to_unsigned_int(payload, self.context.i64_type(), "f64_to_int")
+            .unwrap();
+
+        // Extract pointer (lower 48 bits)
+        let ptr_mask = self.context.i64_type().const_int((1u64 << 48) - 1, false);
+        let ptr_as_int = self.builder
+            .build_and(packed, ptr_mask, "extract_ptr")
+            .unwrap();
+        let ptr = self.builder
+            .build_int_to_ptr(
+                ptr_as_int,
+                self.context.ptr_type(inkwell::AddressSpace::default()),
+                "int_to_ptr"
+            )
+            .unwrap();
+
+        // Extract length (upper 16 bits)
+        let len_shifted = self.builder
+            .build_right_shift(packed, self.context.i64_type().const_int(48, false), false, "len_unshift")
+            .unwrap();
+
+        (ptr, len_shifted)
+    }
+
     /// Extracts the tag from a PyObject
     fn extract_tag(&self, pyobject: StructValue<'ctx>) -> IntValue<'ctx> {
         self.builder
@@ -205,8 +292,8 @@ impl<'ctx> Compiler<'ctx> {
 
         // Compile all function definitions first
         for func_stmt in functions {
-            if let IRStmt::FunctionDef { name, params, body } = func_stmt {
-                self.compile_function_def(name, params, body)?;
+            if let IRStmt::FunctionDef { name, params, defaults, body } = func_stmt {
+                self.compile_function_def(name, params, defaults, body)?;
             }
         }
 
@@ -771,21 +858,41 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             IRExpr::Call { func, args } => {
-                let function = self
+                // Clone the function value to avoid borrow checker issues
+                let function = *self
                     .functions
                     .get(func)
                     .ok_or_else(|| CodeGenError::UndefinedVariable(format!("function '{}'", func)))?;
 
+                // Get defaults for this function
+                let defaults = self.function_defaults.get(func).cloned().unwrap_or_default();
+                let num_provided_args = args.len();
+
+                // Compile provided arguments
                 let mut compiled_args = Vec::new();
-                for arg in args {
+                for arg in args.iter() {
                     let arg_pyobj = self.compile_expression(arg)?;
-                    // Functions now expect PyObject arguments
                     compiled_args.push(arg_pyobj.into());
+                }
+
+                // Add default arguments for missing parameters
+                // Only iterate through defaults that correspond to parameters we didn't provide
+                if num_provided_args < defaults.len() {
+                    for i in num_provided_args..defaults.len() {
+                        if let Some(default_expr) = &defaults[i] {
+                            let default_pyobj = self.compile_expression(default_expr)?;
+                            compiled_args.push(default_pyobj.into());
+                        } else {
+                            return Err(CodeGenError::UndefinedVariable(
+                                format!("Missing required argument {} for function '{}'", i, func)
+                            ));
+                        }
+                    }
                 }
 
                 let call_result = self
                     .builder
-                    .build_call(*function, &compiled_args, "calltmp")
+                    .build_call(function, &compiled_args, "calltmp")
                     .unwrap();
 
                 // Extract the return value from the call (should be a PyObject)
@@ -1008,6 +1115,96 @@ impl<'ctx> Compiler<'ctx> {
                     }
                 }
             }
+            IRExpr::List(elements) => {
+                // Compile all element expressions
+                let mut compiled_elements = Vec::new();
+                for elem in elements {
+                    let elem_pyobj = self.compile_expression(elem)?;
+                    compiled_elements.push(elem_pyobj);
+                }
+
+                let list_len = elements.len();
+                let pyobject_type = self.create_pyobject_type();
+
+                // Allocate memory for the array of PyObjects
+                // size = list_len * sizeof(PyObject)
+                let pyobject_size = pyobject_type.size_of().unwrap();
+                let element_count = self.context.i64_type().const_int(list_len as u64, false);
+                let total_size = self.builder
+                    .build_int_mul(
+                        pyobject_size,
+                        element_count,
+                        "list_size"
+                    )
+                    .unwrap();
+
+                // Allocate the list
+                let malloc_fn = self.add_malloc();
+                let list_ptr_result = self.builder
+                    .build_call(malloc_fn, &[total_size.into()], "malloc_list")
+                    .unwrap();
+                let list_ptr = match list_ptr_result.try_as_basic_value() {
+                    inkwell::values::ValueKind::Basic(value) => value.into_pointer_value(),
+                    _ => {
+                        return Err(CodeGenError::UndefinedVariable(
+                            "malloc did not return a value".to_string()
+                        ))
+                    }
+                };
+
+                // Store each element in the array
+                for (i, elem_pyobj) in compiled_elements.iter().enumerate() {
+                    let index = self.context.i64_type().const_int(i as u64, false);
+                    let elem_ptr = unsafe {
+                        self.builder
+                            .build_in_bounds_gep(
+                                pyobject_type,
+                                list_ptr,
+                                &[index],
+                                &format!("elem_ptr_{}", i)
+                            )
+                            .unwrap()
+                    };
+                    self.builder.build_store(elem_ptr, *elem_pyobj).unwrap();
+                }
+
+                // Create a PyObject with LIST tag and the pointer as payload
+                Ok(self.create_pyobject_list(list_ptr, list_len))
+            }
+            IRExpr::Index { list, index } => {
+                let list_obj = self.compile_expression(list)?;
+                let index_obj = self.compile_expression(index)?;
+
+                // Extract the list pointer and length from the PyObject
+                let (list_ptr, _list_len) = self.extract_list_ptr_and_len(list_obj);
+
+                // Extract the index value
+                let index_payload = self.extract_payload(index_obj);
+                let index_int = self.builder
+                    .build_float_to_signed_int(index_payload, self.context.i64_type(), "index_int")
+                    .unwrap();
+
+                // Get the element at the index
+                let pyobject_type = self.create_pyobject_type();
+                let elem_ptr = unsafe {
+                    self.builder
+                        .build_in_bounds_gep(
+                            pyobject_type,
+                            list_ptr,
+                            &[index_int],
+                            "elem_ptr"
+                        )
+                        .unwrap()
+                };
+
+                // Load and return the element
+                let elem = self.builder
+                    .build_load(pyobject_type, elem_ptr, "elem")
+                    .unwrap()
+                    .into_struct_value();
+
+                Ok(elem)
+            }
         }
     }
 
@@ -1015,6 +1212,7 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         name: &str,
         params: &[String],
+        defaults: &[Option<IRExpr>],
         body: &[IRStmt],
     ) -> Result<(), CodeGenError> {
         let pyobject_type = self.create_pyobject_type();
@@ -1024,8 +1222,9 @@ impl<'ctx> Compiler<'ctx> {
         let fn_type = pyobject_type.fn_type(&param_types, false);
         let function = self.module.add_function(name, fn_type, None);
 
-        // Store function in the functions map
+        // Store function and defaults in the maps
         self.functions.insert(name.to_string(), function);
+        self.function_defaults.insert(name.to_string(), defaults.to_vec());
 
         // Create entry block
         let entry = self.context.append_basic_block(function, "entry");
