@@ -7,6 +7,17 @@ pub enum BinOp {
     Div,
 }
 
+/// The set of supported comparison operators.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CmpOp {
+    Eq,   // ==
+    NotEq, // !=
+    Lt,   // <
+    Gt,   // >
+    LtE,  // <=
+    GtE,  // >=
+}
+
 /// A simplified Intermediate Representation for expressions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum IRExpr {
@@ -29,6 +40,14 @@ pub enum IRExpr {
     },
     /// An input() call to read from stdin.
     Input,
+    /// A comparison operation.
+    Comparison {
+        op: CmpOp,
+        left: Box<IRExpr>,
+        right: Box<IRExpr>,
+    },
+    /// A string literal.
+    StringLiteral(String),
 }
 
 /// A simplified Intermediate Representation for statements.
@@ -46,4 +65,15 @@ pub enum IRStmt {
     },
     /// A return statement.
     Return(IRExpr),
+    /// An if/else statement.
+    If {
+        condition: IRExpr,
+        then_body: Vec<IRStmt>,
+        else_body: Vec<IRStmt>,
+    },
+    /// A while loop.
+    While {
+        condition: IRExpr,
+        body: Vec<IRStmt>,
+    },
 }
