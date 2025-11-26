@@ -40,6 +40,8 @@ pub enum IRExpr {
     Constant(i64),
     /// A constant float value.
     Float(f64),
+    /// A boolean literal value.
+    Bool(bool),
     /// A variable lookup.
     Variable(String),
     /// A binary operation.
@@ -96,4 +98,15 @@ pub enum IRStmt {
         condition: IRExpr,
         body: Vec<IRStmt>,
     },
+    /// A for loop (range-based only).
+    For {
+        var: String,
+        start: IRExpr,
+        end: IRExpr,
+        body: Vec<IRStmt>,
+    },
+    /// A break statement.
+    Break,
+    /// A continue statement.
+    Continue,
 }

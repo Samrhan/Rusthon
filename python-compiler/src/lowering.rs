@@ -85,17 +85,8 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
             let then_body: Result<Vec<IRStmt>, LoweringError> =
                 body.iter().map(lower_statement).collect();
 
-            // Handle else clause
+            // Handle else clause (including elif, which is represented as a nested If in orelse)
             let else_body = if !orelse.is_empty() {
-                // For simplicity, check if it's a plain else or elif
-                // If orelse contains an If statement, it's an elif
-                if orelse.len() == 1 {
-                    if let ast::Stmt::If(_) = &orelse[0] {
-                        // This is an elif - not supported yet
-                        return Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())));
-                    }
-                }
-                // It's a plain else clause
                 let else_stmts: Result<Vec<IRStmt>, LoweringError> =
                     orelse.iter().map(lower_statement).collect();
                 else_stmts?
@@ -137,6 +128,47 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())))
             }
         }
+        ast::Stmt::Break(_) => Ok(IRStmt::Break),
+        ast::Stmt::Continue(_) => Ok(IRStmt::Continue),
+        ast::Stmt::For(ast::StmtFor { target, iter, body, .. }) => {
+            // Only support for i in range(...) pattern
+            if let ast::Expr::Call(ast::ExprCall { func, args, .. }) = iter.as_ref() {
+                if let ast::Expr::Name(ast::ExprName { id, .. }) = func.as_ref() {
+                    if id == "range" && !args.is_empty() {
+                        // Extract the loop variable
+                        let var = if let ast::Expr::Name(ast::ExprName { id, .. }) = target.as_ref() {
+                            id.to_string()
+                        } else {
+                            return Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())));
+                        };
+
+                        // Handle range(end) or range(start, end)
+                        let (start, end) = if args.len() == 1 {
+                            // range(end) - start from 0
+                            (IRExpr::Constant(0), lower_expression(&args[0])?)
+                        } else if args.len() == 2 {
+                            // range(start, end)
+                            (lower_expression(&args[0])?, lower_expression(&args[1])?)
+                        } else {
+                            // range with step is not supported
+                            return Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())));
+                        };
+
+                        // Lower the loop body
+                        let body: Result<Vec<IRStmt>, LoweringError> =
+                            body.iter().map(lower_statement).collect();
+
+                        return Ok(IRStmt::For {
+                            var,
+                            start,
+                            end,
+                            body: body?,
+                        });
+                    }
+                }
+            }
+            Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())))
+        }
         _ => Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone()))),
     }
 }
@@ -148,6 +180,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
             ast::Constant::Int(n) => Ok(IRExpr::Constant(n.to_i64().unwrap())),
             ast::Constant::Float(f) => Ok(IRExpr::Float(*f)),
             ast::Constant::Str(s) => Ok(IRExpr::StringLiteral(s.to_string())),
+            ast::Constant::Bool(b) => Ok(IRExpr::Bool(*b)),
             _ => Err(LoweringError::UnsupportedExpression(Box::new(expr.clone()))),
         },
         ast::Expr::Name(ast::ExprName { id, .. }) => Ok(IRExpr::Variable(id.to_string())),
@@ -249,5 +282,134 @@ fn lower_binop(op: &ast::Operator) -> Result<BinOp, LoweringError> {
         ast::Operator::LShift => Ok(BinOp::LShift),
         ast::Operator::RShift => Ok(BinOp::RShift),
         _ => Err(LoweringError::UnsupportedOperator(*op)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustpython_parser::ast;
+
+    #[test]
+    fn test_bool_literal() {
+        let source = "x = True\ny = False";
+        let stmts = ast::Suite::parse(source, "<test>").unwrap();
+        let ir = lower_program(&stmts).unwrap();
+
+        assert_eq!(ir.len(), 2);
+        if let IRStmt::Assign { target, value } = &ir[0] {
+            assert_eq!(target, "x");
+            assert_eq!(value, &IRExpr::Bool(true));
+        } else {
+            panic!("Expected Assign statement");
+        }
+
+        if let IRStmt::Assign { target, value } = &ir[1] {
+            assert_eq!(target, "y");
+            assert_eq!(value, &IRExpr::Bool(false));
+        } else {
+            panic!("Expected Assign statement");
+        }
+    }
+
+    #[test]
+    fn test_elif_support() {
+        let source = r#"
+if x == 1:
+    print(1)
+elif x == 2:
+    print(2)
+else:
+    print(3)
+"#;
+        let stmts = ast::Suite::parse(source, "<test>").unwrap();
+        let ir = lower_program(&stmts);
+
+        // Should not error (previously would error on elif)
+        assert!(ir.is_ok());
+
+        let ir = ir.unwrap();
+        assert_eq!(ir.len(), 1);
+
+        // Check that it's an If statement with an else body containing another If
+        if let IRStmt::If { condition: _, then_body, else_body } = &ir[0] {
+            assert_eq!(then_body.len(), 1);
+            assert_eq!(else_body.len(), 1);
+            // The else body should contain the elif as a nested If
+            assert!(matches!(else_body[0], IRStmt::If { .. }));
+        } else {
+            panic!("Expected If statement");
+        }
+    }
+
+    #[test]
+    fn test_break_continue() {
+        let source = r#"
+while True:
+    if x == 1:
+        break
+    if x == 2:
+        continue
+    print(x)
+"#;
+        let stmts = ast::Suite::parse(source, "<test>").unwrap();
+        let ir = lower_program(&stmts).unwrap();
+
+        assert_eq!(ir.len(), 1);
+        if let IRStmt::While { body, .. } = &ir[0] {
+            // Find break and continue in the body
+            let has_break = body.iter().any(|stmt| {
+                if let IRStmt::If { then_body, .. } = stmt {
+                    then_body.iter().any(|s| matches!(s, IRStmt::Break))
+                } else {
+                    false
+                }
+            });
+            let has_continue = body.iter().any(|stmt| {
+                if let IRStmt::If { then_body, .. } = stmt {
+                    then_body.iter().any(|s| matches!(s, IRStmt::Continue))
+                } else {
+                    false
+                }
+            });
+            assert!(has_break, "Should contain break statement");
+            assert!(has_continue, "Should contain continue statement");
+        } else {
+            panic!("Expected While statement");
+        }
+    }
+
+    #[test]
+    fn test_for_range() {
+        let source = "for i in range(5):\n    print(i)";
+        let stmts = ast::Suite::parse(source, "<test>").unwrap();
+        let ir = lower_program(&stmts).unwrap();
+
+        assert_eq!(ir.len(), 1);
+        if let IRStmt::For { var, start, end, body } = &ir[0] {
+            assert_eq!(var, "i");
+            assert_eq!(start, &IRExpr::Constant(0));
+            assert_eq!(end, &IRExpr::Constant(5));
+            assert_eq!(body.len(), 1);
+        } else {
+            panic!("Expected For statement");
+        }
+    }
+
+    #[test]
+    fn test_for_range_start_end() {
+        let source = "for j in range(2, 8):\n    print(j)";
+        let stmts = ast::Suite::parse(source, "<test>").unwrap();
+        let ir = lower_program(&stmts).unwrap();
+
+        assert_eq!(ir.len(), 1);
+        if let IRStmt::For { var, start, end, body } = &ir[0] {
+            assert_eq!(var, "j");
+            assert_eq!(start, &IRExpr::Constant(2));
+            assert_eq!(end, &IRExpr::Constant(8));
+            assert_eq!(body.len(), 1);
+        } else {
+            panic!("Expected For statement");
+        }
     }
 }
