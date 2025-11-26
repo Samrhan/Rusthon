@@ -1,0 +1,34 @@
+---
+source: tests/functions.rs
+assertion_line: 33
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+
+define i64 @multiply(i64 %0, i64 %1, i64 %2) {
+entry:
+  %z = alloca i64, align 8
+  %y = alloca i64, align 8
+  %x = alloca i64, align 8
+  store i64 %0, ptr %x, align 4
+  store i64 %1, ptr %y, align 4
+  store i64 %2, ptr %z, align 4
+  %x1 = load i64, ptr %x, align 4
+  %y2 = load i64, ptr %y, align 4
+  %multmp = mul i64 %x1, %y2
+  %z3 = load i64, ptr %z, align 4
+  %multmp4 = mul i64 %multmp, %z3
+  ret i64 %multmp4
+}
+
+define i32 @main() {
+entry:
+  %calltmp = call i64 @multiply(i64 2, i64 3, i64 4)
+  %printf_call = call i32 (ptr, ...) @printf(ptr @format_string, i64 %calltmp)
+  ret i32 0
+}
+
+declare i32 @printf(ptr, ...)

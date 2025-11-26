@@ -147,11 +147,17 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(*function, &compiled_args, "calltmp")
                     .unwrap();
 
-                Ok(call_result
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_int_value())
+                // Extract the return value from the call
+                // try_as_basic_value returns ValueKind enum
+                use inkwell::values::ValueKind;
+                match call_result.try_as_basic_value() {
+                    ValueKind::Basic(value) => Ok(value.into_int_value()),
+                    ValueKind::Instruction(_) => {
+                        Err(CodeGenError::UndefinedVariable(
+                            "Function call did not return a value".to_string()
+                        ))
+                    }
+                }
             }
         }
     }
