@@ -72,6 +72,13 @@ pub enum IRExpr {
         op: UnaryOp,
         operand: Box<IRExpr>,
     },
+    /// A list literal.
+    List(Vec<IRExpr>),
+    /// List indexing.
+    Index {
+        list: Box<IRExpr>,
+        index: Box<IRExpr>,
+    },
 }
 
 /// A simplified Intermediate Representation for statements.
@@ -85,6 +92,7 @@ pub enum IRStmt {
     FunctionDef {
         name: String,
         params: Vec<String>,
+        defaults: Vec<Option<IRExpr>>,
         body: Vec<IRStmt>,
     },
     /// A return statement.
