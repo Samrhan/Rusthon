@@ -51,6 +51,29 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 Err(LoweringError::UnsupportedStatement(stmt.clone()))
             }
         }
+        ast::Stmt::FunctionDef(ast::StmtFunctionDef {
+            name, args, body, ..
+        }) => {
+            let params = args
+                .args
+                .iter()
+                .map(|arg| arg.def.arg.to_string())
+                .collect();
+            let body: Result<Vec<IRStmt>, LoweringError> =
+                body.iter().map(lower_statement).collect();
+            Ok(IRStmt::FunctionDef {
+                name: name.to_string(),
+                params,
+                body: body?,
+            })
+        }
+        ast::Stmt::Return(ast::StmtReturn { value, .. }) => {
+            let value = value
+                .as_ref()
+                .ok_or_else(|| LoweringError::UnsupportedStatement(stmt.clone()))?;
+            let expr = lower_expression(value)?;
+            Ok(IRStmt::Return(expr))
+        }
         _ => Err(LoweringError::UnsupportedStatement(stmt.clone())),
     }
 }
@@ -83,6 +106,22 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                 left: Box::new(left),
                 right: Box::new(right),
             })
+        }
+        ast::Expr::Call(ast::ExprCall { func, args, .. }) => {
+            if let ast::Expr::Name(ast::ExprName { id, .. }) = func.as_ref() {
+                // Don't handle print here - it's handled as a statement
+                if id == "print" {
+                    return Err(LoweringError::UnsupportedExpression(expr.clone()));
+                }
+                let args: Result<Vec<IRExpr>, LoweringError> =
+                    args.iter().map(lower_expression).collect();
+                Ok(IRExpr::Call {
+                    func: id.to_string(),
+                    args: args?,
+                })
+            } else {
+                Err(LoweringError::UnsupportedExpression(expr.clone()))
+            }
         }
         _ => Err(LoweringError::UnsupportedExpression(expr.clone())),
     }
