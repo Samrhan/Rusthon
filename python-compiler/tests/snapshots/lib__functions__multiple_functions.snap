@@ -6,59 +6,59 @@ expression: llvm_ir
 ; ModuleID = 'main'
 source_filename = "main"
 
-@format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
 
-define i64 @add(i64 %0, i64 %1) {
+define double @add(double %0, double %1) {
 entry:
-  %b = alloca i64, align 8
-  %a = alloca i64, align 8
-  store i64 %0, ptr %a, align 4
-  store i64 %1, ptr %b, align 4
-  %a1 = load i64, ptr %a, align 4
-  %b2 = load i64, ptr %b, align 4
-  %addtmp = add i64 %a1, %b2
-  ret i64 %addtmp
+  %b = alloca double, align 8
+  %a = alloca double, align 8
+  store double %0, ptr %a, align 8
+  store double %1, ptr %b, align 8
+  %a1 = load double, ptr %a, align 8
+  %b2 = load double, ptr %b, align 8
+  %addtmp = fadd double %a1, %b2
+  ret double %addtmp
 }
 
-define i64 @subtract(i64 %0, i64 %1) {
+define double @subtract(double %0, double %1) {
 entry:
-  %b = alloca i64, align 8
-  %a = alloca i64, align 8
-  store i64 %0, ptr %a, align 4
-  store i64 %1, ptr %b, align 4
-  %a1 = load i64, ptr %a, align 4
-  %b2 = load i64, ptr %b, align 4
-  %subtmp = sub i64 %a1, %b2
-  ret i64 %subtmp
+  %b = alloca double, align 8
+  %a = alloca double, align 8
+  store double %0, ptr %a, align 8
+  store double %1, ptr %b, align 8
+  %a1 = load double, ptr %a, align 8
+  %b2 = load double, ptr %b, align 8
+  %subtmp = fsub double %a1, %b2
+  ret double %subtmp
 }
 
-define i64 @multiply(i64 %0, i64 %1) {
+define double @multiply(double %0, double %1) {
 entry:
-  %b = alloca i64, align 8
-  %a = alloca i64, align 8
-  store i64 %0, ptr %a, align 4
-  store i64 %1, ptr %b, align 4
-  %a1 = load i64, ptr %a, align 4
-  %b2 = load i64, ptr %b, align 4
-  %multmp = mul i64 %a1, %b2
-  ret i64 %multmp
+  %b = alloca double, align 8
+  %a = alloca double, align 8
+  store double %0, ptr %a, align 8
+  store double %1, ptr %b, align 8
+  %a1 = load double, ptr %a, align 8
+  %b2 = load double, ptr %b, align 8
+  %multmp = fmul double %a1, %b2
+  ret double %multmp
 }
 
 define i32 @main() {
 entry:
-  %z = alloca i64, align 8
-  %y = alloca i64, align 8
-  %x = alloca i64, align 8
-  %calltmp = call i64 @add(i64 10, i64 5)
-  store i64 %calltmp, ptr %x, align 4
-  %x1 = load i64, ptr %x, align 4
-  %calltmp2 = call i64 @subtract(i64 %x1, i64 3)
-  store i64 %calltmp2, ptr %y, align 4
-  %y3 = load i64, ptr %y, align 4
-  %calltmp4 = call i64 @multiply(i64 %y3, i64 2)
-  store i64 %calltmp4, ptr %z, align 4
-  %z5 = load i64, ptr %z, align 4
-  %printf_call = call i32 (ptr, ...) @printf(ptr @format_string, i64 %z5)
+  %z = alloca double, align 8
+  %y = alloca double, align 8
+  %x = alloca double, align 8
+  %calltmp = call double @add(double 1.000000e+01, double 5.000000e+00)
+  store double %calltmp, ptr %x, align 8
+  %x1 = load double, ptr %x, align 8
+  %calltmp2 = call double @subtract(double %x1, double 3.000000e+00)
+  store double %calltmp2, ptr %y, align 8
+  %y3 = load double, ptr %y, align 8
+  %calltmp4 = call double @multiply(double %y3, double 2.000000e+00)
+  store double %calltmp4, ptr %z, align 8
+  %z5 = load double, ptr %z, align 8
+  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double %z5)
   ret i32 0
 }
 

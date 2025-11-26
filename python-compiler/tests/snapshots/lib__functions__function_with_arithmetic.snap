@@ -6,26 +6,26 @@ expression: llvm_ir
 ; ModuleID = 'main'
 source_filename = "main"
 
-@format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
 
-define i64 @calculate(i64 %0, i64 %1) {
+define double @calculate(double %0, double %1) {
 entry:
-  %b = alloca i64, align 8
-  %a = alloca i64, align 8
-  store i64 %0, ptr %a, align 4
-  store i64 %1, ptr %b, align 4
-  %a1 = load i64, ptr %a, align 4
-  %multmp = mul i64 %a1, 2
-  %b2 = load i64, ptr %b, align 4
-  %multmp3 = mul i64 %b2, 3
-  %addtmp = add i64 %multmp, %multmp3
-  ret i64 %addtmp
+  %b = alloca double, align 8
+  %a = alloca double, align 8
+  store double %0, ptr %a, align 8
+  store double %1, ptr %b, align 8
+  %a1 = load double, ptr %a, align 8
+  %multmp = fmul double %a1, 2.000000e+00
+  %b2 = load double, ptr %b, align 8
+  %multmp3 = fmul double %b2, 3.000000e+00
+  %addtmp = fadd double %multmp, %multmp3
+  ret double %addtmp
 }
 
 define i32 @main() {
 entry:
-  %calltmp = call i64 @calculate(i64 5, i64 10)
-  %printf_call = call i32 (ptr, ...) @printf(ptr @format_string, i64 %calltmp)
+  %calltmp = call double @calculate(double 5.000000e+00, double 1.000000e+01)
+  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double %calltmp)
   ret i32 0
 }
 

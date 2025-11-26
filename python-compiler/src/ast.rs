@@ -12,6 +12,8 @@ pub enum BinOp {
 pub enum IRExpr {
     /// A constant integer value.
     Constant(i64),
+    /// A constant float value.
+    Float(f64),
     /// A variable lookup.
     Variable(String),
     /// A binary operation.

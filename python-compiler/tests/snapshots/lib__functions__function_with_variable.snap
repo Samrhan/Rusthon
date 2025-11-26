@@ -6,25 +6,25 @@ expression: llvm_ir
 ; ModuleID = 'main'
 source_filename = "main"
 
-@format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
 
-define i64 @compute(i64 %0) {
+define double @compute(double %0) {
 entry:
-  %y = alloca i64, align 8
-  %x = alloca i64, align 8
-  store i64 %0, ptr %x, align 4
-  %x1 = load i64, ptr %x, align 4
-  %addtmp = add i64 %x1, 10
-  store i64 %addtmp, ptr %y, align 4
-  %y2 = load i64, ptr %y, align 4
-  %multmp = mul i64 %y2, 2
-  ret i64 %multmp
+  %y = alloca double, align 8
+  %x = alloca double, align 8
+  store double %0, ptr %x, align 8
+  %x1 = load double, ptr %x, align 8
+  %addtmp = fadd double %x1, 1.000000e+01
+  store double %addtmp, ptr %y, align 8
+  %y2 = load double, ptr %y, align 8
+  %multmp = fmul double %y2, 2.000000e+00
+  ret double %multmp
 }
 
 define i32 @main() {
 entry:
-  %calltmp = call i64 @compute(i64 5)
-  %printf_call = call i32 (ptr, ...) @printf(ptr @format_string, i64 %calltmp)
+  %calltmp = call double @compute(double 5.000000e+00)
+  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double %calltmp)
   ret i32 0
 }
 

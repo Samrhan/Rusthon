@@ -2,7 +2,7 @@ use crate::ast::{BinOp, IRExpr, IRStmt};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::values::{FunctionValue, IntValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, FloatValue, PointerValue};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -103,32 +103,38 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn compile_expression(&self, expr: &IRExpr) -> Result<IntValue<'ctx>, CodeGenError> {
+    fn compile_expression(&self, expr: &IRExpr) -> Result<BasicValueEnum<'ctx>, CodeGenError> {
         match expr {
-            IRExpr::Constant(n) => Ok(self.context.i64_type().const_int(*n as u64, true)),
-            IRExpr::Variable(name) => self
-                .variables
-                .get(name)
-                .map(|ptr| {
-                    self.builder
-                        .build_load(self.context.i64_type(), *ptr, name)
-                        .unwrap()
-                        .into_int_value()
-                })
-                .ok_or_else(|| CodeGenError::UndefinedVariable(name.clone())),
+            IRExpr::Constant(n) => {
+                Ok(self.context.i64_type().const_int(*n as u64, true).into())
+            }
+            IRExpr::Float(f) => {
+                Ok(self.context.f64_type().const_float(*f).into())
+            }
+            IRExpr::Variable(name) => {
+                self.variables
+                    .get(name)
+                    .map(|ptr| {
+                        self.builder
+                            .build_load(self.context.f64_type(), *ptr, name)
+                            .unwrap()
+                    })
+                    .ok_or_else(|| CodeGenError::UndefinedVariable(name.clone()))
+            }
             IRExpr::BinaryOp { op, left, right } => {
                 let lhs = self.compile_expression(left)?;
                 let rhs = self.compile_expression(right)?;
+
+                // Promote to float if either operand is float
+                let (lhs_float, rhs_float) = self.promote_to_float(lhs, rhs);
+
                 let result = match op {
-                    BinOp::Add => self.builder.build_int_add(lhs, rhs, "addtmp").unwrap(),
-                    BinOp::Sub => self.builder.build_int_sub(lhs, rhs, "subtmp").unwrap(),
-                    BinOp::Mul => self.builder.build_int_mul(lhs, rhs, "multmp").unwrap(),
-                    BinOp::Div => self
-                        .builder
-                        .build_int_signed_div(lhs, rhs, "divtmp")
-                        .unwrap(),
+                    BinOp::Add => self.builder.build_float_add(lhs_float, rhs_float, "addtmp").unwrap(),
+                    BinOp::Sub => self.builder.build_float_sub(lhs_float, rhs_float, "subtmp").unwrap(),
+                    BinOp::Mul => self.builder.build_float_mul(lhs_float, rhs_float, "multmp").unwrap(),
+                    BinOp::Div => self.builder.build_float_div(lhs_float, rhs_float, "divtmp").unwrap(),
                 };
-                Ok(result)
+                Ok(result.into())
             }
             IRExpr::Call { func, args } => {
                 let function = self
@@ -139,7 +145,20 @@ impl<'ctx> Compiler<'ctx> {
                 let mut compiled_args = Vec::new();
                 for arg in args {
                     let arg_value = self.compile_expression(arg)?;
-                    compiled_args.push(arg_value.into());
+                    // Convert to f64 for function calls
+                    let arg_f64 = if arg_value.is_int_value() {
+                        self.builder
+                            .build_signed_int_to_float(
+                                arg_value.into_int_value(),
+                                self.context.f64_type(),
+                                "arg_to_float"
+                            )
+                            .unwrap()
+                            .into()
+                    } else {
+                        arg_value
+                    };
+                    compiled_args.push(arg_f64.into());
                 }
 
                 let call_result = self
@@ -151,7 +170,7 @@ impl<'ctx> Compiler<'ctx> {
                 // try_as_basic_value returns ValueKind enum
                 use inkwell::values::ValueKind;
                 match call_result.try_as_basic_value() {
-                    ValueKind::Basic(value) => Ok(value.into_int_value()),
+                    ValueKind::Basic(value) => Ok(value),
                     ValueKind::Instruction(_) => {
                         Err(CodeGenError::UndefinedVariable(
                             "Function call did not return a value".to_string()
@@ -162,17 +181,38 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    /// Promote int values to float for mixed arithmetic
+    fn promote_to_float(&self, lhs: BasicValueEnum<'ctx>, rhs: BasicValueEnum<'ctx>) -> (FloatValue<'ctx>, FloatValue<'ctx>) {
+        let lhs_float = if lhs.is_int_value() {
+            self.builder
+                .build_signed_int_to_float(lhs.into_int_value(), self.context.f64_type(), "inttofloat")
+                .unwrap()
+        } else {
+            lhs.into_float_value()
+        };
+
+        let rhs_float = if rhs.is_int_value() {
+            self.builder
+                .build_signed_int_to_float(rhs.into_int_value(), self.context.f64_type(), "inttofloat")
+                .unwrap()
+        } else {
+            rhs.into_float_value()
+        };
+
+        (lhs_float, rhs_float)
+    }
+
     fn compile_function_def(
         &mut self,
         name: &str,
         params: &[String],
         body: &[IRStmt],
     ) -> Result<(), CodeGenError> {
-        let i64_type = self.context.i64_type();
+        let f64_type = self.context.f64_type();
 
-        // Create function signature: all params are i64, return type is i64
-        let param_types: Vec<_> = params.iter().map(|_| i64_type.into()).collect();
-        let fn_type = i64_type.fn_type(&param_types, false);
+        // Create function signature: all params are f64, return type is f64
+        let param_types: Vec<_> = params.iter().map(|_| f64_type.into()).collect();
+        let fn_type = f64_type.fn_type(&param_types, false);
         let function = self.module.add_function(name, fn_type, None);
 
         // Store function in the functions map
@@ -188,7 +228,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Set up parameters as local variables
         for (i, param_name) in params.iter().enumerate() {
-            let param_value = function.get_nth_param(i as u32).unwrap().into_int_value();
+            let param_value = function.get_nth_param(i as u32).unwrap();
             let alloca = self.create_entry_block_alloca(param_name, function);
             self.builder.build_store(alloca, param_value).unwrap();
             self.variables.insert(param_name.clone(), alloca);
@@ -227,7 +267,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         builder
-            .build_alloca(self.context.i64_type(), name)
+            .build_alloca(self.context.f64_type(), name)
             .unwrap()
     }
 
@@ -242,21 +282,34 @@ impl<'ctx> Compiler<'ctx> {
             .add_function("printf", printf_type, Some(Linkage::External))
     }
 
-    fn get_format_string(&self) -> PointerValue<'ctx> {
+    fn get_int_format_string(&self) -> PointerValue<'ctx> {
         self.builder
-            .build_global_string_ptr("%d\n", "format_string")
+            .build_global_string_ptr("%d\n", "int_format_string")
             .unwrap()
             .as_pointer_value()
     }
 
-    fn build_print(&self, value: IntValue<'ctx>) {
+    fn get_float_format_string(&self) -> PointerValue<'ctx> {
+        self.builder
+            .build_global_string_ptr("%f\n", "float_format_string")
+            .unwrap()
+            .as_pointer_value()
+    }
+
+    fn build_print(&self, value: BasicValueEnum<'ctx>) {
         let printf = self.add_printf();
-        let format_string = self.get_format_string();
+
+        // Determine the correct format string based on the value type
+        let (format_string, print_value) = if value.is_int_value() {
+            (self.get_int_format_string(), value)
+        } else {
+            (self.get_float_format_string(), value)
+        };
 
         self.builder
             .build_call(
                 printf,
-                &[format_string.into(), value.into()],
+                &[format_string.into(), print_value.into()],
                 "printf_call",
             )
             .unwrap();

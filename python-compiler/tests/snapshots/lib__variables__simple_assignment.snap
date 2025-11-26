@@ -6,14 +6,14 @@ expression: llvm_ir
 ; ModuleID = 'main'
 source_filename = "main"
 
-@format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
 
 define i32 @main() {
 entry:
-  %x = alloca i64, align 8
+  %x = alloca double, align 8
   store i64 10, ptr %x, align 4
-  %x1 = load i64, ptr %x, align 4
-  %printf_call = call i32 (ptr, ...) @printf(ptr @format_string, i64 %x1)
+  %x1 = load double, ptr %x, align 8
+  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double %x1)
   ret i32 0
 }
 
