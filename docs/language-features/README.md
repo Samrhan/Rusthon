@@ -18,7 +18,7 @@ Rusthon supports a useful subset of Python focused on:
 | Integers | ✅ Full | `/language-features/data-types#integers` |
 | Floats | ✅ Full | `/language-features/data-types#floats` |
 | Booleans | ✅ Full (True/False) | `/language-features/data-types#booleans` |
-| Strings | ✅ Literals only | `/language-features/data-types#strings` |
+| Strings | ✅ Concatenation, len() | `/language-features/data-types#strings` |
 | Lists | ❌ Not supported | See `/limitations` |
 | Dictionaries | ❌ Not supported | See `/limitations` |
 | **Operators** |  |  |
@@ -110,6 +110,24 @@ if x and not y:
 x = 12 & 10  # 8
 y = 12 | 10  # 14
 z = 5 << 2   # 20
+```
+
+### Strings
+```python
+# Concatenation
+greeting = "Hello" + " " + "World"
+print(greeting)  # "Hello World"
+
+# Length
+message = "Python"
+n = len(message)
+print(n)  # 6
+
+# Combined
+s1 = "Hello"
+s2 = " World"
+combined = s1 + s2
+print(len(combined))  # 11
 ```
 
 ## Documentation Sections

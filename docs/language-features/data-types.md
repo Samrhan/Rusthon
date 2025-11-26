@@ -135,7 +135,7 @@ if 0:           # Falsy
 
 ## Strings
 
-String literals for text output.
+String literals for text manipulation and output.
 
 ### Literals
 
@@ -150,6 +150,8 @@ empty = ""
 Strings can be:
 - Assigned to variables
 - Printed with `print()`
+- Concatenated with `+`
+- Measured with `len()`
 - Used as function arguments
 
 ```python
@@ -157,43 +159,97 @@ greeting = "Hello"
 print(greeting)
 ```
 
-### Limitations
+### String Concatenation
 
-❌ **String operations not supported:**
+Combine strings using the `+` operator:
+
+```python
+# Basic concatenation
+first = "Hello"
+second = " World"
+result = first + second
+print(result)  # "Hello World"
+
+# Chained concatenation
+message = "Hello" + " " + "World"
+print(message)  # "Hello World"
+
+# Empty strings
+s = "" + "Hello"
+print(s)  # "Hello"
+```
+
+### String Length
+
+Get the length of a string using the `len()` function:
+
+```python
+# Basic usage
+text = "Hello"
+n = len(text)
+print(n)  # 5
+
+# Empty strings
+empty = ""
+print(len(empty))  # 0
+
+# Inline usage
+print(len("Hello World"))  # 11
+
+# With concatenation
+s1 = "Hello"
+s2 = " World"
+combined = s1 + s2
+print(len(combined))  # 11
+```
+
+### String Operations
+
+✅ **Supported operations:**
 ```python
 # Concatenation
-result = "Hello" + " " + "World"  # ❌ Not supported
+result = "Hello" + " " + "World"  # ✅ Supported
 
+# Length
+length = len("hello")             # ✅ Supported
+
+# Multiple arguments in print
+print("Hello", "World")           # ✅ Supported
+```
+
+❌ **Not yet supported:**
+```python
 # Indexing
 char = "hello"[0]                 # ❌ Not supported
 
 # Methods
 upper = "hello".upper()           # ❌ Not supported
 
-# Length
-length = len("hello")             # ❌ Not supported
-
 # Iteration
 for char in "hello":              # ❌ Not supported
     print(char)
+
+# Slicing
+substr = "hello"[1:3]             # ❌ Not supported
 ```
 
-### Workarounds
+### Memory Management
 
-Use multiple prints:
+✅ **Arena Allocation:** Strings are managed using an arena allocator. All allocated strings are automatically freed when the program exits, preventing memory leaks.
+
 ```python
-# Instead of concatenation
-print("Hello")
-print(" ")
-print("World")
-
-# Or with multiple arguments
-print("Hello", "World")
+# Safe - strings are automatically cleaned up
+for i in range(1000):
+    s = "Iteration: " + "test"
+    print(s)
+# All strings freed at program exit
 ```
 
-### Memory
-
-⚠️ **Strings are never freed:** Each string literal allocates memory that persists for the program's lifetime. Avoid creating many unique strings in loops.
+**How it works:**
+- Each string is allocated with `malloc()`
+- Pointers are tracked in a global arena
+- All strings are freed at the end of `main()`
+- Concatenation creates new strings that are also tracked
 
 ## Type System Architecture
 
@@ -310,15 +366,16 @@ if is_valid:
     process()
 ```
 
-### Minimize String Usage
+### String Usage is Safe
 
 ```python
-# Good - print once
+# Safe - strings are automatically cleaned up at program exit
 print("Result:", result)
 
-# Bad - creates many string allocations
+# Also safe - all strings freed when program ends
 for i in range(1000):
-    print("Processing")  # Memory leak!
+    message = "Processing " + "iteration"
+    print(message)
 ```
 
 ## Type Checking
