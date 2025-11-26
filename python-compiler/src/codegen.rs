@@ -178,6 +178,31 @@ impl<'ctx> Compiler<'ctx> {
                     }
                 }
             }
+            IRExpr::Input => {
+                let scanf = self.add_scanf();
+                let format_string = self.get_scanf_float_format_string();
+
+                // Allocate space for the input value
+                let input_alloca = self.builder
+                    .build_alloca(self.context.f64_type(), "input_tmp")
+                    .unwrap();
+
+                // Call scanf
+                self.builder
+                    .build_call(
+                        scanf,
+                        &[format_string.into(), input_alloca.into()],
+                        "scanf_call",
+                    )
+                    .unwrap();
+
+                // Load the value from the alloca
+                let value = self.builder
+                    .build_load(self.context.f64_type(), input_alloca, "input_value")
+                    .unwrap();
+
+                Ok(value)
+            }
         }
     }
 
@@ -282,6 +307,17 @@ impl<'ctx> Compiler<'ctx> {
             .add_function("printf", printf_type, Some(Linkage::External))
     }
 
+    fn add_scanf(&self) -> FunctionValue<'ctx> {
+        if let Some(function) = self.module.get_function("scanf") {
+            return function;
+        }
+        let i32_type = self.context.i32_type();
+        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let scanf_type = i32_type.fn_type(&[i8_ptr_type.into()], true);
+        self.module
+            .add_function("scanf", scanf_type, Some(Linkage::External))
+    }
+
     fn get_int_format_string(&self) -> PointerValue<'ctx> {
         self.builder
             .build_global_string_ptr("%d\n", "int_format_string")
@@ -292,6 +328,13 @@ impl<'ctx> Compiler<'ctx> {
     fn get_float_format_string(&self) -> PointerValue<'ctx> {
         self.builder
             .build_global_string_ptr("%f\n", "float_format_string")
+            .unwrap()
+            .as_pointer_value()
+    }
+
+    fn get_scanf_float_format_string(&self) -> PointerValue<'ctx> {
+        self.builder
+            .build_global_string_ptr("%lf", "scanf_float_format_string")
             .unwrap()
             .as_pointer_value()
     }
