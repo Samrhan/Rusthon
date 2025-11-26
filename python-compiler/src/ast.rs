@@ -5,6 +5,12 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    Mod,      // %
+    BitAnd,   // &
+    BitOr,    // |
+    BitXor,   // ^
+    LShift,   // <<
+    RShift,   // >>
 }
 
 /// The set of supported comparison operators.
@@ -16,6 +22,15 @@ pub enum CmpOp {
     Gt,   // >
     LtE,  // <=
     GtE,  // >=
+}
+
+/// The set of supported unary operators.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnaryOp {
+    Not,      // not (logical NOT)
+    Invert,   // ~ (bitwise NOT)
+    UAdd,     // +x (unary plus)
+    USub,     // -x (unary minus)
 }
 
 /// A simplified Intermediate Representation for expressions.
@@ -48,6 +63,11 @@ pub enum IRExpr {
     },
     /// A string literal.
     StringLiteral(String),
+    /// A unary operation.
+    UnaryOp {
+        op: UnaryOp,
+        operand: Box<IRExpr>,
+    },
 }
 
 /// A simplified Intermediate Representation for statements.

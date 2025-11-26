@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt};
+use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt, UnaryOp};
 use num_traits::ToPrimitive;
 use rustpython_parser::ast;
 use thiserror::Error;
@@ -121,6 +121,25 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 body: body?,
             })
         }
+        ast::Stmt::AugAssign(ast::StmtAugAssign { target, op, value, .. }) => {
+            // Desugar augmented assignment: x += y => x = x + y
+            if let ast::Expr::Name(ast::ExprName { id, .. }) = target.as_ref() {
+                let current_value = IRExpr::Variable(id.to_string());
+                let new_value = lower_expression(value)?;
+                let op = lower_binop(op)?;
+                let result = IRExpr::BinaryOp {
+                    op,
+                    left: Box::new(current_value),
+                    right: Box::new(new_value),
+                };
+                Ok(IRStmt::Assign {
+                    target: id.to_string(),
+                    value: result,
+                })
+            } else {
+                Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())))
+            }
+        }
         _ => Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone()))),
     }
 }
@@ -143,13 +162,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
         }) => {
             let left = lower_expression(left)?;
             let right = lower_expression(right)?;
-            let op = match op {
-                ast::Operator::Add => BinOp::Add,
-                ast::Operator::Sub => BinOp::Sub,
-                ast::Operator::Mult => BinOp::Mul,
-                ast::Operator::Div => BinOp::Div,
-                _ => return Err(LoweringError::UnsupportedOperator(*op)),
-            };
+            let op = lower_binop(op)?;
             Ok(IRExpr::BinaryOp {
                 op,
                 left: Box::new(left),
@@ -208,6 +221,36 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                 right: Box::new(right),
             })
         }
+        ast::Expr::UnaryOp(ast::ExprUnaryOp { op, operand, .. }) => {
+            let operand = lower_expression(operand)?;
+            let op = match op {
+                ast::UnaryOp::Invert => UnaryOp::Invert,
+                ast::UnaryOp::Not => UnaryOp::Not,
+                ast::UnaryOp::UAdd => UnaryOp::UAdd,
+                ast::UnaryOp::USub => UnaryOp::USub,
+            };
+            Ok(IRExpr::UnaryOp {
+                op,
+                operand: Box::new(operand),
+            })
+        }
         _ => Err(LoweringError::UnsupportedExpression(Box::new(expr.clone()))),
+    }
+}
+
+/// Helper function to convert AST binary operators to IR binary operators.
+fn lower_binop(op: &ast::Operator) -> Result<BinOp, LoweringError> {
+    match op {
+        ast::Operator::Add => Ok(BinOp::Add),
+        ast::Operator::Sub => Ok(BinOp::Sub),
+        ast::Operator::Mult => Ok(BinOp::Mul),
+        ast::Operator::Div => Ok(BinOp::Div),
+        ast::Operator::Mod => Ok(BinOp::Mod),
+        ast::Operator::BitAnd => Ok(BinOp::BitAnd),
+        ast::Operator::BitOr => Ok(BinOp::BitOr),
+        ast::Operator::BitXor => Ok(BinOp::BitXor),
+        ast::Operator::LShift => Ok(BinOp::LShift),
+        ast::Operator::RShift => Ok(BinOp::RShift),
+        _ => Err(LoweringError::UnsupportedOperator(*op)),
     }
 }
