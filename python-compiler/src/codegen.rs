@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt};
+use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt, UnaryOp};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
@@ -360,55 +360,88 @@ impl<'ctx> Compiler<'ctx> {
                 let lhs_obj = self.compile_expression(left)?;
                 let rhs_obj = self.compile_expression(right)?;
 
-                // Extract tags and payloads
-                let lhs_tag = self.extract_tag(lhs_obj);
-                let rhs_tag = self.extract_tag(rhs_obj);
-                let lhs_payload = self.extract_payload(lhs_obj);
-                let rhs_payload = self.extract_payload(rhs_obj);
+                // Handle bitwise operations separately (they require integer operands)
+                match op {
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::LShift | BinOp::RShift => {
+                        // Convert payloads to integers
+                        let lhs_payload = self.extract_payload(lhs_obj);
+                        let rhs_payload = self.extract_payload(rhs_obj);
 
-                // Check if either operand is a float (tag == TYPE_TAG_FLOAT)
-                let float_tag_const = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
-                let lhs_is_float = self.builder
-                    .build_int_compare(inkwell::IntPredicate::EQ, lhs_tag, float_tag_const, "lhs_is_float")
-                    .unwrap();
-                let rhs_is_float = self.builder
-                    .build_int_compare(inkwell::IntPredicate::EQ, rhs_tag, float_tag_const, "rhs_is_float")
-                    .unwrap();
+                        let lhs_int = self.builder
+                            .build_float_to_signed_int(lhs_payload, self.context.i64_type(), "lhs_to_int")
+                            .unwrap();
+                        let rhs_int = self.builder
+                            .build_float_to_signed_int(rhs_payload, self.context.i64_type(), "rhs_to_int")
+                            .unwrap();
 
-                // If either is float, result should be float
-                let result_is_float = self.builder
-                    .build_or(lhs_is_float, rhs_is_float, "result_is_float")
-                    .unwrap();
+                        // Perform bitwise operation
+                        let result_int = match op {
+                            BinOp::BitAnd => self.builder.build_and(lhs_int, rhs_int, "and").unwrap(),
+                            BinOp::BitOr => self.builder.build_or(lhs_int, rhs_int, "or").unwrap(),
+                            BinOp::BitXor => self.builder.build_xor(lhs_int, rhs_int, "xor").unwrap(),
+                            BinOp::LShift => self.builder.build_left_shift(lhs_int, rhs_int, "shl").unwrap(),
+                            BinOp::RShift => self.builder.build_right_shift(lhs_int, rhs_int, true, "shr").unwrap(),
+                            _ => unreachable!(),
+                        };
 
-                // Perform the operation on payloads
-                let result_payload = match op {
-                    BinOp::Add => self.builder.build_float_add(lhs_payload, rhs_payload, "addtmp").unwrap(),
-                    BinOp::Sub => self.builder.build_float_sub(lhs_payload, rhs_payload, "subtmp").unwrap(),
-                    BinOp::Mul => self.builder.build_float_mul(lhs_payload, rhs_payload, "multmp").unwrap(),
-                    BinOp::Div => self.builder.build_float_div(lhs_payload, rhs_payload, "divtmp").unwrap(),
-                };
+                        // Convert result back to PyObject (always returns integer type)
+                        Ok(self.create_pyobject_int(result_int))
+                    }
+                    // Arithmetic operations (Add, Sub, Mul, Div, Mod)
+                    _ => {
+                        // Extract tags and payloads
+                        let lhs_tag = self.extract_tag(lhs_obj);
+                        let rhs_tag = self.extract_tag(rhs_obj);
+                        let lhs_payload = self.extract_payload(lhs_obj);
+                        let rhs_payload = self.extract_payload(rhs_obj);
 
-                // Select the result tag based on whether either operand is float
-                let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
-                let float_tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
-                let result_tag = self.builder
-                    .build_select(result_is_float, float_tag, int_tag, "result_tag")
-                    .unwrap()
-                    .into_int_value();
+                        // Check if either operand is a float (tag == TYPE_TAG_FLOAT)
+                        let float_tag_const = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
+                        let lhs_is_float = self.builder
+                            .build_int_compare(inkwell::IntPredicate::EQ, lhs_tag, float_tag_const, "lhs_is_float")
+                            .unwrap();
+                        let rhs_is_float = self.builder
+                            .build_int_compare(inkwell::IntPredicate::EQ, rhs_tag, float_tag_const, "rhs_is_float")
+                            .unwrap();
 
-                // Create result PyObject
-                let pyobject_type = self.create_pyobject_type();
-                let mut result_obj = pyobject_type.get_undef();
-                result_obj = self.builder
-                    .build_insert_value(result_obj, result_tag, 0, "insert_tag")
-                    .unwrap()
-                    .into_struct_value();
-                result_obj = self.builder
-                    .build_insert_value(result_obj, result_payload, 1, "insert_payload")
-                    .unwrap()
-                    .into_struct_value();
+                        // If either is float, result should be float
+                        let result_is_float = self.builder
+                            .build_or(lhs_is_float, rhs_is_float, "result_is_float")
+                            .unwrap();
 
-                Ok(result_obj)
+                        // Perform the operation on payloads
+                        let result_payload = match op {
+                            BinOp::Add => self.builder.build_float_add(lhs_payload, rhs_payload, "addtmp").unwrap(),
+                            BinOp::Sub => self.builder.build_float_sub(lhs_payload, rhs_payload, "subtmp").unwrap(),
+                            BinOp::Mul => self.builder.build_float_mul(lhs_payload, rhs_payload, "multmp").unwrap(),
+                            BinOp::Div => self.builder.build_float_div(lhs_payload, rhs_payload, "divtmp").unwrap(),
+                            BinOp::Mod => self.builder.build_float_rem(lhs_payload, rhs_payload, "modtmp").unwrap(),
+                            _ => unreachable!(),
+                        };
+
+                        // Select the result tag based on whether either operand is float
+                        let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
+                        let float_tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
+                        let result_tag = self.builder
+                            .build_select(result_is_float, float_tag, int_tag, "result_tag")
+                            .unwrap()
+                            .into_int_value();
+
+                        // Create result PyObject
+                        let pyobject_type = self.create_pyobject_type();
+                        let mut result_obj = pyobject_type.get_undef();
+                        result_obj = self.builder
+                            .build_insert_value(result_obj, result_tag, 0, "insert_tag")
+                            .unwrap()
+                            .into_struct_value();
+                        result_obj = self.builder
+                            .build_insert_value(result_obj, result_payload, 1, "insert_payload")
+                            .unwrap()
+                            .into_struct_value();
+
+                        Ok(result_obj)
+                    }
+                }
             }
             IRExpr::Call { func, args } => {
                 let function = self
@@ -534,6 +567,59 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Wrap the string pointer in a PyObject
                 Ok(self.create_pyobject_string(str_ptr))
+            }
+            IRExpr::UnaryOp { op, operand } => {
+                let operand_obj = self.compile_expression(operand)?;
+
+                match op {
+                    UnaryOp::Invert => {
+                        // Bitwise NOT (~x)
+                        let payload = self.extract_payload(operand_obj);
+                        let operand_int = self.builder
+                            .build_float_to_signed_int(payload, self.context.i64_type(), "to_int")
+                            .unwrap();
+                        let result = self.builder.build_not(operand_int, "not").unwrap();
+                        Ok(self.create_pyobject_int(result))
+                    }
+                    UnaryOp::USub => {
+                        // Unary minus (-x)
+                        let payload = self.extract_payload(operand_obj);
+                        let zero = self.context.f64_type().const_float(0.0);
+                        let result = self.builder.build_float_sub(zero, payload, "neg").unwrap();
+
+                        // Preserve the type tag from the operand
+                        let tag = self.extract_tag(operand_obj);
+                        let pyobject_type = self.create_pyobject_type();
+                        let mut result_obj = pyobject_type.get_undef();
+                        result_obj = self.builder
+                            .build_insert_value(result_obj, tag, 0, "insert_tag")
+                            .unwrap()
+                            .into_struct_value();
+                        result_obj = self.builder
+                            .build_insert_value(result_obj, result, 1, "insert_payload")
+                            .unwrap()
+                            .into_struct_value();
+
+                        Ok(result_obj)
+                    }
+                    UnaryOp::UAdd => {
+                        // Unary plus (+x) - just return the operand unchanged
+                        Ok(operand_obj)
+                    }
+                    UnaryOp::Not => {
+                        // Logical NOT (not x)
+                        let payload = self.extract_payload(operand_obj);
+                        let zero = self.context.f64_type().const_float(0.0);
+
+                        // Check if operand is zero
+                        let is_zero = self.builder
+                            .build_float_compare(FloatPredicate::OEQ, payload, zero, "is_zero")
+                            .unwrap();
+
+                        // Return True if operand is zero, False otherwise
+                        Ok(self.create_pyobject_bool(is_zero))
+                    }
+                }
             }
         }
     }
