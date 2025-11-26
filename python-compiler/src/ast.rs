@@ -74,7 +74,7 @@ pub enum IRExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum IRStmt {
     /// A print statement.
-    Print(IRExpr),
+    Print(Vec<IRExpr>),
     /// An assignment statement.
     Assign { target: String, value: IRExpr },
     /// A function definition.

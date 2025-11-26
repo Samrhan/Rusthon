@@ -13,8 +13,6 @@ pub enum LoweringError {
     UnsupportedOperator(ast::Operator),
     #[error("Unsupported comparison operator: {0:?}")]
     UnsupportedComparisonOperator(ast::CmpOp),
-    #[error("Print statement expects 1 argument, but found {0}")]
-    PrintArgumentMismatch(usize),
     #[error("Comparison must have exactly one operator and two operands")]
     InvalidComparison,
 }
@@ -31,11 +29,10 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
             if let ast::Expr::Call(ast::ExprCall { func, args, .. }) = value.as_ref() {
                 if let ast::Expr::Name(ast::ExprName { id, .. }) = func.as_ref() {
                     if id == "print" {
-                        if args.len() != 1 {
-                            return Err(LoweringError::PrintArgumentMismatch(args.len()));
-                        }
-                        let arg = lower_expression(&args[0])?;
-                        return Ok(IRStmt::Print(arg));
+                        // Lower all arguments
+                        let lowered_args: Result<Vec<IRExpr>, LoweringError> =
+                            args.iter().map(lower_expression).collect();
+                        return Ok(IRStmt::Print(lowered_args?));
                     }
                 }
             }

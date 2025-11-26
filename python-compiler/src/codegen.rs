@@ -234,9 +234,32 @@ impl<'ctx> Compiler<'ctx> {
         current_fn: FunctionValue<'ctx>,
     ) -> Result<(), CodeGenError> {
         match stmt {
-            IRStmt::Print(expr) => {
-                let value = self.compile_expression(expr)?;
-                self.build_print(value);
+            IRStmt::Print(exprs) => {
+                // Handle print with multiple arguments
+                if exprs.is_empty() {
+                    // print() with no arguments just prints a newline
+                    let printf = self.add_printf();
+                    self.builder
+                        .build_call(printf, &[self.get_newline_format_string().into()], "printf_newline")
+                        .unwrap();
+                } else {
+                    // Print each argument
+                    for (i, expr) in exprs.iter().enumerate() {
+                        let value = self.compile_expression(expr)?;
+                        let is_last = i == exprs.len() - 1;
+
+                        // Print the value (with newline only for the last one)
+                        self.build_print_value(value, is_last);
+
+                        // Print a space between arguments (but not after the last one)
+                        if !is_last {
+                            let printf = self.add_printf();
+                            self.builder
+                                .build_call(printf, &[self.get_space_format_string().into()], "printf_space")
+                                .unwrap();
+                        }
+                    }
+                }
             }
             IRStmt::Assign { target, value } => {
                 let value = self.compile_expression(value)?;
@@ -768,7 +791,42 @@ impl<'ctx> Compiler<'ctx> {
             .as_pointer_value()
     }
 
-    fn build_print(&self, pyobject: StructValue<'ctx>) {
+    fn get_int_format_string_no_newline(&self) -> PointerValue<'ctx> {
+        self.builder
+            .build_global_string_ptr("%d", "int_format_no_nl")
+            .unwrap()
+            .as_pointer_value()
+    }
+
+    fn get_float_format_string_no_newline(&self) -> PointerValue<'ctx> {
+        self.builder
+            .build_global_string_ptr("%f", "float_format_no_nl")
+            .unwrap()
+            .as_pointer_value()
+    }
+
+    fn get_string_format_string_no_newline(&self) -> PointerValue<'ctx> {
+        self.builder
+            .build_global_string_ptr("%s", "string_format_no_nl")
+            .unwrap()
+            .as_pointer_value()
+    }
+
+    fn get_space_format_string(&self) -> PointerValue<'ctx> {
+        self.builder
+            .build_global_string_ptr(" ", "space_format")
+            .unwrap()
+            .as_pointer_value()
+    }
+
+    fn get_newline_format_string(&self) -> PointerValue<'ctx> {
+        self.builder
+            .build_global_string_ptr("\n", "newline_format")
+            .unwrap()
+            .as_pointer_value()
+    }
+
+    fn build_print_value(&self, pyobject: StructValue<'ctx>, with_newline: bool) {
         let printf = self.add_printf();
 
         // Extract tag and payload
@@ -816,10 +874,15 @@ impl<'ctx> Compiler<'ctx> {
         let int_val = self.builder
             .build_float_to_signed_int(payload, self.context.i64_type(), "to_int")
             .unwrap();
+        let int_format = if with_newline {
+            self.get_int_format_string()
+        } else {
+            self.get_int_format_string_no_newline()
+        };
         self.builder
             .build_call(
                 printf,
-                &[self.get_int_format_string().into(), int_val.into()],
+                &[int_format.into(), int_val.into()],
                 "printf_int",
             )
             .unwrap();
@@ -827,10 +890,15 @@ impl<'ctx> Compiler<'ctx> {
 
         // Float block
         self.builder.position_at_end(float_block);
+        let float_format = if with_newline {
+            self.get_float_format_string()
+        } else {
+            self.get_float_format_string_no_newline()
+        };
         self.builder
             .build_call(
                 printf,
-                &[self.get_float_format_string().into(), payload.into()],
+                &[float_format.into(), payload.into()],
                 "printf_float",
             )
             .unwrap();
@@ -839,10 +907,15 @@ impl<'ctx> Compiler<'ctx> {
         // String block
         self.builder.position_at_end(string_block);
         let str_ptr = self.extract_string_ptr(pyobject);
+        let string_format = if with_newline {
+            self.get_string_format_string()
+        } else {
+            self.get_string_format_string_no_newline()
+        };
         self.builder
             .build_call(
                 printf,
-                &[self.get_string_format_string().into(), str_ptr.into()],
+                &[string_format.into(), str_ptr.into()],
                 "printf_string",
             )
             .unwrap();
