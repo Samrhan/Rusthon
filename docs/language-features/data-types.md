@@ -315,22 +315,23 @@ last = numbers[3]    # 40
 Lists can be:
 - Assigned to variables
 - Indexed with integers
-- Printed with `print()`
+- ~~Printed with `print()`~~ (temporarily disabled)
 - Created with mixed types (int, float, bool, string)
 - Passed to functions
 
 ```python
 # Basic usage
 x = [1, 2, 3]
-print(x)  # [1, 2, 3]
+# print(x)  # NOT SUPPORTED - list printing temporarily disabled
+
+# Indexing works!
+value = x[1]
+print(value)  # 2
 
 # Mixed types
 mixed = [1, 2.5, True, "hello"]
-print(mixed)  # [1, 2, True, hello]
-
-# Indexing
-value = x[1]
-print(value)  # 2
+first = mixed[0]
+print(first)  # 1
 ```
 
 ### Memory Management
@@ -356,16 +357,20 @@ x = [1, 2, 3]                     # ✅ Supported
 
 # Indexing
 value = x[0]                      # ✅ Supported
-
-# Printing
-print(x)                          # ✅ Supported ([1, 2, 3])
+print(value)                      # ✅ Supported (prints the element)
 
 # Mixed types
 mixed = [1, 2.5, "hello", True]   # ✅ Supported
+element = mixed[2]                # ✅ Supported
+print(element)                    # ✅ Supported (prints "hello")
 ```
 
 ❌ **Not yet supported:**
 ```python
+# Printing lists (temporarily disabled)
+print([1, 2, 3])                  # ❌ Not supported (causes issues)
+print(x)                          # ❌ Not supported for list variables
+
 # Methods
 x.append(4)                       # ❌ Not supported
 
@@ -394,14 +399,15 @@ n = len(x)                        # ❌ Not supported (yet)
 ```python
 # Simple list
 numbers = [1, 2, 3, 4, 5]
-print(numbers)       # [1, 2, 3, 4, 5]
-print(numbers[2])    # 3
+# print(numbers)     # NOT SUPPORTED - list printing disabled
+print(numbers[2])    # 3 - indexing works!
 
 # List with expressions
 a = 5
 b = 10
 computed = [a, a + b, b * 2]
-print(computed)      # [5, 15, 20]
+first = computed[0]
+print(first)         # 5
 
 # Passing to functions
 def first_element(lst):

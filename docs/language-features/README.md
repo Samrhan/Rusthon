@@ -140,14 +140,15 @@ mixed = [1, 2.5, True, "hello"]
 print(numbers[0])  # 1
 print(numbers[2])  # 3
 
-# Printing
-print(numbers)     # [1, 2, 3, 4, 5]
+# Note: Printing entire lists is temporarily disabled
+# print(numbers)   # NOT SUPPORTED
 
 # With expressions
 a = 10
 b = 20
 computed = [a, a + b, b * 2]
-print(computed)    # [10, 30, 40]
+element = computed[0]
+print(element)     # 10
 ```
 
 ### Default Arguments
