@@ -2,9 +2,11 @@ use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt, UnaryOp};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
+use inkwell::passes::{PassManager, PassManagerBuilder};
 use inkwell::values::{FunctionValue, FloatValue, IntValue, PointerValue, StructValue};
 use inkwell::FloatPredicate;
 use inkwell::types::StructType;
+use inkwell::OptimizationLevel;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -284,6 +286,27 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap()
     }
 
+    /// Creates and configures an LLVM optimization pass manager
+    fn create_optimization_passes(&self) -> PassManager<FunctionValue<'ctx>> {
+        let pass_manager_builder = PassManagerBuilder::create();
+        pass_manager_builder.set_optimization_level(OptimizationLevel::Default);
+
+        let fpm = PassManager::create(&self.module);
+
+        // Add standard optimization passes
+        fpm.add_instruction_combining_pass();
+        fpm.add_reassociate_pass();
+        fpm.add_gvn_pass();
+        fpm.add_cfg_simplification_pass();
+        fpm.add_promote_memory_to_register_pass();
+        fpm.add_basic_alias_analysis_pass();
+        fpm.add_function_inlining_pass();
+        fpm.add_tail_call_elimination_pass();
+
+        fpm.initialize();
+        fpm
+    }
+
     pub fn compile_program(mut self, program: &[IRStmt]) -> Result<String, CodeGenError> {
         // Separate function definitions from top-level statements
         let (functions, top_level): (Vec<_>, Vec<_>) = program.iter().partition(|stmt| {
@@ -325,6 +348,17 @@ impl<'ctx> Compiler<'ctx> {
                 "Main function verification failed".to_string(),
             ));
         }
+
+        // Run optimization passes on all functions
+        let fpm = self.create_optimization_passes();
+
+        // Optimize all user-defined functions
+        for function in self.functions.values() {
+            fpm.run_on(function);
+        }
+
+        // Optimize main function
+        fpm.run_on(&main_fn);
 
         Ok(self.module.print_to_string().to_string())
     }
