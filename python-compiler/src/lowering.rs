@@ -114,6 +114,13 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                 if id == "print" {
                     return Err(LoweringError::UnsupportedExpression(expr.clone()));
                 }
+                // Handle input() call
+                if id == "input" {
+                    if !args.is_empty() {
+                        return Err(LoweringError::UnsupportedExpression(expr.clone()));
+                    }
+                    return Ok(IRExpr::Input);
+                }
                 let args: Result<Vec<IRExpr>, LoweringError> =
                     args.iter().map(lower_expression).collect();
                 Ok(IRExpr::Call {

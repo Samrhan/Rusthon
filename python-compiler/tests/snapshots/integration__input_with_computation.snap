@@ -1,0 +1,42 @@
+---
+source: tests/integration.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@scanf_float_format_string = private unnamed_addr constant [4 x i8] c"%lf\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+
+define double @double(double %0) {
+entry:
+  %x = alloca double, align 8
+  store double %0, ptr %x, align 8
+  %x1 = load double, ptr %x, align 8
+  %multmp = fmul double %x1, 2.000000e+00
+  ret double %multmp
+}
+
+define i32 @main() {
+entry:
+  %c = alloca double, align 8
+  %b = alloca double, align 8
+  %a = alloca double, align 8
+  %input_tmp = alloca double, align 8
+  %scanf_call = call i32 (ptr, ...) @scanf(ptr @scanf_float_format_string, ptr %input_tmp)
+  %input_value = load double, ptr %input_tmp, align 8
+  store double %input_value, ptr %a, align 8
+  %a1 = load double, ptr %a, align 8
+  %calltmp = call double @double(double %a1)
+  store double %calltmp, ptr %b, align 8
+  %b2 = load double, ptr %b, align 8
+  %addtmp = fadd double %b2, 5.000000e+00
+  store double %addtmp, ptr %c, align 8
+  %c3 = load double, ptr %c, align 8
+  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double %c3)
+  ret i32 0
+}
+
+declare i32 @scanf(ptr, ...)
+
+declare i32 @printf(ptr, ...)

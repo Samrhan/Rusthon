@@ -5,11 +5,14 @@ A Python-to-LLVM compiler written in Rust, implementing a subset of Python that 
 ## Features
 
 - ✅ Integer arithmetic (`+`, `-`, `*`, `/`)
+- ✅ Floating-point numbers and mixed arithmetic
 - ✅ Variables and assignments
 - ✅ Function definitions with parameters
 - ✅ Function calls
 - ✅ Return statements
 - ✅ Print statements
+- ✅ Input from stdin (`input()`)
+- ✅ Detailed error messages with line/column information
 - 🚧 More features coming soon...
 
 ## Quick Start
@@ -109,12 +112,17 @@ python-compiler/
 │   ├── compiler.rs     # Compiler orchestration
 │   ├── lowering.rs     # Python AST → IR lowering
 │   ├── parser.rs       # Python parsing (wraps rustpython-parser)
+│   ├── error.rs        # Error reporting with ariadne
 │   ├── lib.rs          # Library exports
 │   └── main.rs         # CLI entry point
 ├── tests/
 │   ├── arithmetic.rs   # Arithmetic operation tests
 │   ├── variables.rs    # Variable assignment tests
-│   └── functions.rs    # Function definition and call tests
+│   ├── functions.rs    # Function definition and call tests
+│   ├── floats.rs       # Floating-point and mixed arithmetic tests
+│   ├── input.rs        # Input from stdin tests
+│   ├── errors.rs       # Error handling tests
+│   └── integration.rs  # Integration tests combining all features
 └── Cargo.toml
 ```
 
@@ -123,13 +131,15 @@ python-compiler/
 ### Expressions
 
 - Integer literals: `42`, `100`
+- Float literals: `3.14`, `2.5`
 - Variables: `x`, `my_var`
 - Binary operations: `a + b`, `x * y`, `a - b`, `x / y`
 - Function calls: `add(1, 2)`, `compute(x, y, z)`
+- Input calls: `input()`
 
 ### Statements
 
-- Assignments: `x = 10`, `y = x + 5`
+- Assignments: `x = 10`, `y = x + 5`, `z = input()`
 - Function definitions:
   ```python
   def func_name(param1, param2):
@@ -140,14 +150,16 @@ python-compiler/
 
 ### Limitations
 
-- All values are treated as 64-bit signed integers (i64)
+- All numeric values are promoted to 64-bit floats (f64) for mixed arithmetic
+- The `input()` function reads floating-point numbers from stdin
 - No support for:
-  - Strings, floats, booleans (except as future additions)
+  - Strings and booleans
   - Lists, tuples, dictionaries
   - Classes and objects
   - Control flow (if/else, loops)
   - Exceptions
   - Modules and imports
+  - Multiple arguments to `print()` or `input()`
 
 ## Architecture
 
@@ -161,10 +173,12 @@ Python Source → Parser → Python AST → Lowering → IR → Code Generation 
 
 ### Key Design Decisions
 
-1. **Monomorphic Types**: All values are i64 integers for simplicity
+1. **Float-first Types**: All numeric values are promoted to f64 for simplicity and mixed arithmetic
 2. **Custom IR**: A simplified intermediate representation between Python AST and LLVM
 3. **Inkwell**: Safe Rust bindings to LLVM for code generation
 4. **Function-first**: Functions are compiled before top-level code
+5. **FFI for I/O**: Direct calls to libc `printf` and `scanf` for input/output
+6. **Ariadne Error Reporting**: Beautiful error messages with source location context
 
 ## Testing
 

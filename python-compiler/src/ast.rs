@@ -27,6 +27,8 @@ pub enum IRExpr {
         func: String,
         args: Vec<IRExpr>,
     },
+    /// An input() call to read from stdin.
+    Input,
 }
 
 /// A simplified Intermediate Representation for statements.

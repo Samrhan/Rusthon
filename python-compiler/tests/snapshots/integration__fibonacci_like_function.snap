@@ -1,0 +1,39 @@
+---
+source: tests/integration.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+
+define double @compute(double %0) {
+entry:
+  %b = alloca double, align 8
+  %a = alloca double, align 8
+  %n = alloca double, align 8
+  store double %0, ptr %n, align 8
+  %n1 = load double, ptr %n, align 8
+  %multmp = fmul double %n1, 2.000000e+00
+  store double %multmp, ptr %a, align 8
+  %a2 = load double, ptr %a, align 8
+  %addtmp = fadd double %a2, 1.000000e+01
+  store double %addtmp, ptr %b, align 8
+  %b3 = load double, ptr %b, align 8
+  ret double %b3
+}
+
+define i32 @main() {
+entry:
+  %result = alloca double, align 8
+  %x = alloca double, align 8
+  store i64 5, ptr %x, align 4
+  %x1 = load double, ptr %x, align 8
+  %calltmp = call double @compute(double %x1)
+  store double %calltmp, ptr %result, align 8
+  %result2 = load double, ptr %result, align 8
+  %printf_call = call i32 (ptr, ...) @printf(ptr @float_format_string, double %result2)
+  ret i32 0
+}
+
+declare i32 @printf(ptr, ...)
