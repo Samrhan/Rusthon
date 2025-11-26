@@ -2,10 +2,16 @@ use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::values::{BasicValueEnum, FunctionValue, FloatValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, FloatValue, IntValue, PointerValue, StructValue};
 use inkwell::FloatPredicate;
+use inkwell::types::StructType;
 use std::collections::HashMap;
 use thiserror::Error;
+
+// Type tags for PyObject discrimination
+const TYPE_TAG_INT: u8 = 0;
+const TYPE_TAG_FLOAT: u8 = 1;
+const TYPE_TAG_BOOL: u8 = 2;
 
 #[derive(Debug, Error)]
 pub enum CodeGenError {
@@ -34,6 +40,106 @@ impl<'ctx> Compiler<'ctx> {
             variables: HashMap::new(),
             functions: HashMap::new(),
         }
+    }
+
+    /// Creates the PyObject struct type: {i8 tag, f64 payload}
+    fn create_pyobject_type(&self) -> StructType<'ctx> {
+        let i8_type = self.context.i8_type();
+        let f64_type = self.context.f64_type();
+        self.context.struct_type(&[i8_type.into(), f64_type.into()], false)
+    }
+
+    /// Creates a PyObject value from an integer
+    fn create_pyobject_int(&self, value: IntValue<'ctx>) -> StructValue<'ctx> {
+        let pyobject_type = self.create_pyobject_type();
+        let tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
+
+        // Convert i64 to f64 for storage in the payload
+        let value_f64 = self.builder
+            .build_signed_int_to_float(value, self.context.f64_type(), "int_to_f64")
+            .unwrap();
+
+        // Create the struct
+        let mut pyobject = pyobject_type.get_undef();
+        pyobject = self.builder
+            .build_insert_value(pyobject, tag, 0, "insert_tag")
+            .unwrap()
+            .into_struct_value();
+        pyobject = self.builder
+            .build_insert_value(pyobject, value_f64, 1, "insert_payload")
+            .unwrap()
+            .into_struct_value();
+
+        pyobject
+    }
+
+    /// Creates a PyObject value from a float
+    fn create_pyobject_float(&self, value: FloatValue<'ctx>) -> StructValue<'ctx> {
+        let pyobject_type = self.create_pyobject_type();
+        let tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
+
+        // Create the struct
+        let mut pyobject = pyobject_type.get_undef();
+        pyobject = self.builder
+            .build_insert_value(pyobject, tag, 0, "insert_tag")
+            .unwrap()
+            .into_struct_value();
+        pyobject = self.builder
+            .build_insert_value(pyobject, value, 1, "insert_payload")
+            .unwrap()
+            .into_struct_value();
+
+        pyobject
+    }
+
+    /// Creates a PyObject value from a boolean (stored as 0.0 or 1.0)
+    fn create_pyobject_bool(&self, value: IntValue<'ctx>) -> StructValue<'ctx> {
+        let pyobject_type = self.create_pyobject_type();
+        let tag = self.context.i8_type().const_int(TYPE_TAG_BOOL as u64, false);
+
+        // Convert i1 to f64 (0.0 or 1.0)
+        let value_f64 = self.builder
+            .build_unsigned_int_to_float(value, self.context.f64_type(), "bool_to_f64")
+            .unwrap();
+
+        // Create the struct
+        let mut pyobject = pyobject_type.get_undef();
+        pyobject = self.builder
+            .build_insert_value(pyobject, tag, 0, "insert_tag")
+            .unwrap()
+            .into_struct_value();
+        pyobject = self.builder
+            .build_insert_value(pyobject, value_f64, 1, "insert_payload")
+            .unwrap()
+            .into_struct_value();
+
+        pyobject
+    }
+
+    /// Extracts the tag from a PyObject
+    fn extract_tag(&self, pyobject: StructValue<'ctx>) -> IntValue<'ctx> {
+        self.builder
+            .build_extract_value(pyobject, 0, "extract_tag")
+            .unwrap()
+            .into_int_value()
+    }
+
+    /// Extracts the payload (f64) from a PyObject
+    fn extract_payload(&self, pyobject: StructValue<'ctx>) -> FloatValue<'ctx> {
+        self.builder
+            .build_extract_value(pyobject, 1, "extract_payload")
+            .unwrap()
+            .into_float_value()
+    }
+
+    /// Converts a PyObject to a boolean (i1) for conditionals
+    /// Returns true if the value is non-zero
+    fn pyobject_to_bool(&self, pyobject: StructValue<'ctx>) -> IntValue<'ctx> {
+        let payload = self.extract_payload(pyobject);
+        let zero = self.context.f64_type().const_float(0.0);
+        self.builder
+            .build_float_compare(FloatPredicate::ONE, payload, zero, "to_bool")
+            .unwrap()
     }
 
     pub fn compile_program(mut self, program: &[IRStmt]) -> Result<String, CodeGenError> {
@@ -102,30 +208,10 @@ impl<'ctx> Compiler<'ctx> {
             }
             IRStmt::If { condition, then_body, else_body } => {
                 // Compile the condition expression
-                let cond_value = self.compile_expression(condition)?;
+                let cond_pyobj = self.compile_expression(condition)?;
 
-                // Convert to i1 boolean for branching
-                let cond_bool = if cond_value.is_float_value() {
-                    // Convert float to i1: non-zero is true
-                    let zero = self.context.f64_type().const_float(0.0);
-                    self.builder
-                        .build_float_compare(
-                            FloatPredicate::ONE,  // Ordered and not equal
-                            cond_value.into_float_value(),
-                            zero,
-                            "ifcond"
-                        )
-                        .unwrap()
-                } else {
-                    // Already an integer (from comparison), convert to i1
-                    self.builder
-                        .build_int_truncate(
-                            cond_value.into_int_value(),
-                            self.context.bool_type(),
-                            "ifcond"
-                        )
-                        .unwrap()
-                };
+                // Convert PyObject to boolean for branching
+                let cond_bool = self.pyobject_to_bool(cond_pyobj);
 
                 // Create basic blocks for then, else, and merge
                 let then_bb = self.context.append_basic_block(current_fn, "then");
@@ -171,30 +257,10 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Build the condition block
                 self.builder.position_at_end(loop_cond_bb);
-                let cond_value = self.compile_expression(condition)?;
+                let cond_pyobj = self.compile_expression(condition)?;
 
-                // Convert to i1 boolean for branching
-                let cond_bool = if cond_value.is_float_value() {
-                    // Convert float to i1: non-zero is true
-                    let zero = self.context.f64_type().const_float(0.0);
-                    self.builder
-                        .build_float_compare(
-                            FloatPredicate::ONE,  // Ordered and not equal
-                            cond_value.into_float_value(),
-                            zero,
-                            "loopcond"
-                        )
-                        .unwrap()
-                } else {
-                    // Already an integer (from comparison), convert to i1
-                    self.builder
-                        .build_int_truncate(
-                            cond_value.into_int_value(),
-                            self.context.bool_type(),
-                            "loopcond"
-                        )
-                        .unwrap()
-                };
+                // Convert PyObject to boolean for branching
+                let cond_bool = self.pyobject_to_bool(cond_pyobj);
 
                 // Branch based on condition
                 self.builder
@@ -216,38 +282,82 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn compile_expression(&self, expr: &IRExpr) -> Result<BasicValueEnum<'ctx>, CodeGenError> {
+    fn compile_expression(&self, expr: &IRExpr) -> Result<StructValue<'ctx>, CodeGenError> {
         match expr {
             IRExpr::Constant(n) => {
-                Ok(self.context.i64_type().const_int(*n as u64, true).into())
+                let int_val = self.context.i64_type().const_int(*n as u64, true);
+                Ok(self.create_pyobject_int(int_val))
             }
             IRExpr::Float(f) => {
-                Ok(self.context.f64_type().const_float(*f).into())
+                let float_val = self.context.f64_type().const_float(*f);
+                Ok(self.create_pyobject_float(float_val))
             }
             IRExpr::Variable(name) => {
-                self.variables
+                let ptr = self.variables
                     .get(name)
-                    .map(|ptr| {
-                        self.builder
-                            .build_load(self.context.f64_type(), *ptr, name)
-                            .unwrap()
-                    })
-                    .ok_or_else(|| CodeGenError::UndefinedVariable(name.clone()))
+                    .ok_or_else(|| CodeGenError::UndefinedVariable(name.clone()))?;
+
+                // Variables are stored as PyObject structs
+                let pyobject_type = self.create_pyobject_type();
+                let loaded = self.builder
+                    .build_load(pyobject_type, *ptr, name)
+                    .unwrap();
+
+                Ok(loaded.into_struct_value())
             }
             IRExpr::BinaryOp { op, left, right } => {
-                let lhs = self.compile_expression(left)?;
-                let rhs = self.compile_expression(right)?;
+                let lhs_obj = self.compile_expression(left)?;
+                let rhs_obj = self.compile_expression(right)?;
 
-                // Promote to float if either operand is float
-                let (lhs_float, rhs_float) = self.promote_to_float(lhs, rhs);
+                // Extract tags and payloads
+                let lhs_tag = self.extract_tag(lhs_obj);
+                let rhs_tag = self.extract_tag(rhs_obj);
+                let lhs_payload = self.extract_payload(lhs_obj);
+                let rhs_payload = self.extract_payload(rhs_obj);
 
-                let result = match op {
-                    BinOp::Add => self.builder.build_float_add(lhs_float, rhs_float, "addtmp").unwrap(),
-                    BinOp::Sub => self.builder.build_float_sub(lhs_float, rhs_float, "subtmp").unwrap(),
-                    BinOp::Mul => self.builder.build_float_mul(lhs_float, rhs_float, "multmp").unwrap(),
-                    BinOp::Div => self.builder.build_float_div(lhs_float, rhs_float, "divtmp").unwrap(),
+                // Check if either operand is a float (tag == TYPE_TAG_FLOAT)
+                let float_tag_const = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
+                let lhs_is_float = self.builder
+                    .build_int_compare(inkwell::IntPredicate::EQ, lhs_tag, float_tag_const, "lhs_is_float")
+                    .unwrap();
+                let rhs_is_float = self.builder
+                    .build_int_compare(inkwell::IntPredicate::EQ, rhs_tag, float_tag_const, "rhs_is_float")
+                    .unwrap();
+
+                // If either is float, result should be float
+                let result_is_float = self.builder
+                    .build_or(lhs_is_float, rhs_is_float, "result_is_float")
+                    .unwrap();
+
+                // Perform the operation on payloads
+                let result_payload = match op {
+                    BinOp::Add => self.builder.build_float_add(lhs_payload, rhs_payload, "addtmp").unwrap(),
+                    BinOp::Sub => self.builder.build_float_sub(lhs_payload, rhs_payload, "subtmp").unwrap(),
+                    BinOp::Mul => self.builder.build_float_mul(lhs_payload, rhs_payload, "multmp").unwrap(),
+                    BinOp::Div => self.builder.build_float_div(lhs_payload, rhs_payload, "divtmp").unwrap(),
                 };
-                Ok(result.into())
+
+                // Select the result tag based on whether either operand is float
+                let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
+                let float_tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
+                let result_tag = self.builder
+                    .build_select(result_is_float, float_tag, int_tag, "result_tag")
+                    .unwrap()
+                    .into_int_value();
+
+                // Create result PyObject
+                let pyobject_type = self.create_pyobject_type();
+                let mut result_obj = pyobject_type.get_undef();
+                result_obj = self.builder
+                    .build_insert_value(result_obj, result_tag, 0, "insert_tag")
+                    .unwrap()
+                    .into_struct_value();
+                result_obj = self.builder
+                    .build_insert_value(result_obj, result_payload, 1, "insert_payload")
+                    .unwrap()
+                    .into_struct_value();
+
+                Ok(result_obj)
             }
             IRExpr::Call { func, args } => {
                 let function = self
@@ -257,21 +367,9 @@ impl<'ctx> Compiler<'ctx> {
 
                 let mut compiled_args = Vec::new();
                 for arg in args {
-                    let arg_value = self.compile_expression(arg)?;
-                    // Convert to f64 for function calls
-                    let arg_f64 = if arg_value.is_int_value() {
-                        self.builder
-                            .build_signed_int_to_float(
-                                arg_value.into_int_value(),
-                                self.context.f64_type(),
-                                "arg_to_float"
-                            )
-                            .unwrap()
-                            .into()
-                    } else {
-                        arg_value
-                    };
-                    compiled_args.push(arg_f64.into());
+                    let arg_pyobj = self.compile_expression(arg)?;
+                    // Functions now expect PyObject arguments
+                    compiled_args.push(arg_pyobj.into());
                 }
 
                 let call_result = self
@@ -279,11 +377,10 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(*function, &compiled_args, "calltmp")
                     .unwrap();
 
-                // Extract the return value from the call
-                // try_as_basic_value returns ValueKind enum
+                // Extract the return value from the call (should be a PyObject)
                 use inkwell::values::ValueKind;
                 match call_result.try_as_basic_value() {
-                    ValueKind::Basic(value) => Ok(value),
+                    ValueKind::Basic(value) => Ok(value.into_struct_value()),
                     ValueKind::Instruction(_) => {
                         Err(CodeGenError::UndefinedVariable(
                             "Function call did not return a value".to_string()
@@ -312,16 +409,19 @@ impl<'ctx> Compiler<'ctx> {
                 // Load the value from the alloca
                 let value = self.builder
                     .build_load(self.context.f64_type(), input_alloca, "input_value")
-                    .unwrap();
+                    .unwrap()
+                    .into_float_value();
 
-                Ok(value)
+                // Wrap in PyObject (as float since input() reads floats)
+                Ok(self.create_pyobject_float(value))
             }
             IRExpr::Comparison { op, left, right } => {
-                let lhs = self.compile_expression(left)?;
-                let rhs = self.compile_expression(right)?;
+                let lhs_obj = self.compile_expression(left)?;
+                let rhs_obj = self.compile_expression(right)?;
 
-                // Promote to float if either operand is float
-                let (lhs_float, rhs_float) = self.promote_to_float(lhs, rhs);
+                // Extract payloads (values are already stored as f64)
+                let lhs_payload = self.extract_payload(lhs_obj);
+                let rhs_payload = self.extract_payload(rhs_obj);
 
                 // Perform the comparison
                 let predicate = match op {
@@ -334,38 +434,13 @@ impl<'ctx> Compiler<'ctx> {
                 };
 
                 let cmp_result = self.builder
-                    .build_float_compare(predicate, lhs_float, rhs_float, "cmptmp")
+                    .build_float_compare(predicate, lhs_payload, rhs_payload, "cmptmp")
                     .unwrap();
 
-                // Convert i1 (boolean) result to f64 (0.0 or 1.0) for consistency
-                let result = self.builder
-                    .build_unsigned_int_to_float(cmp_result, self.context.f64_type(), "booltofloat")
-                    .unwrap();
-
-                Ok(result.into())
+                // Return as PyObject with bool tag
+                Ok(self.create_pyobject_bool(cmp_result))
             }
         }
-    }
-
-    /// Promote int values to float for mixed arithmetic
-    fn promote_to_float(&self, lhs: BasicValueEnum<'ctx>, rhs: BasicValueEnum<'ctx>) -> (FloatValue<'ctx>, FloatValue<'ctx>) {
-        let lhs_float = if lhs.is_int_value() {
-            self.builder
-                .build_signed_int_to_float(lhs.into_int_value(), self.context.f64_type(), "inttofloat")
-                .unwrap()
-        } else {
-            lhs.into_float_value()
-        };
-
-        let rhs_float = if rhs.is_int_value() {
-            self.builder
-                .build_signed_int_to_float(rhs.into_int_value(), self.context.f64_type(), "inttofloat")
-                .unwrap()
-        } else {
-            rhs.into_float_value()
-        };
-
-        (lhs_float, rhs_float)
     }
 
     fn compile_function_def(
@@ -374,11 +449,11 @@ impl<'ctx> Compiler<'ctx> {
         params: &[String],
         body: &[IRStmt],
     ) -> Result<(), CodeGenError> {
-        let f64_type = self.context.f64_type();
+        let pyobject_type = self.create_pyobject_type();
 
-        // Create function signature: all params are f64, return type is f64
-        let param_types: Vec<_> = params.iter().map(|_| f64_type.into()).collect();
-        let fn_type = f64_type.fn_type(&param_types, false);
+        // Create function signature: all params are PyObject, return type is PyObject
+        let param_types: Vec<_> = params.iter().map(|_| pyobject_type.into()).collect();
+        let fn_type = pyobject_type.fn_type(&param_types, false);
         let function = self.module.add_function(name, fn_type, None);
 
         // Store function in the functions map
@@ -432,8 +507,10 @@ impl<'ctx> Compiler<'ctx> {
             None => builder.position_at_end(entry),
         }
 
+        // Allocate space for PyObject struct
+        let pyobject_type = self.create_pyobject_type();
         builder
-            .build_alloca(self.context.f64_type(), name)
+            .build_alloca(pyobject_type, name)
             .unwrap()
     }
 
@@ -480,14 +557,45 @@ impl<'ctx> Compiler<'ctx> {
             .as_pointer_value()
     }
 
-    fn build_print(&self, value: BasicValueEnum<'ctx>) {
+    fn build_print(&self, pyobject: StructValue<'ctx>) {
         let printf = self.add_printf();
 
-        // Determine the correct format string based on the value type
-        let (format_string, print_value) = if value.is_int_value() {
-            (self.get_int_format_string(), value)
+        // Extract tag and payload
+        let tag = self.extract_tag(pyobject);
+        let payload = self.extract_payload(pyobject);
+
+        // Check the tag to determine format string
+        let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
+        let float_tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
+
+        let is_int = self.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, tag, int_tag, "is_int")
+            .unwrap();
+        let is_float = self.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, tag, float_tag, "is_float")
+            .unwrap();
+
+        // Select format string based on tag
+        let int_fmt = self.get_int_format_string();
+        let float_fmt = self.get_float_format_string();
+
+        // For int, convert payload to i64; for float/bool, use payload as f64
+        let format_string = self.builder
+            .build_select(is_int, int_fmt, float_fmt, "format_select")
+            .unwrap()
+            .into_pointer_value();
+
+        // Convert payload to int if tag is INT
+        let print_value: BasicValueEnum = if is_int.is_const() && is_int.get_zero_extended_constant().unwrap() == 1 {
+            // Statically known to be int
+            self.builder
+                .build_float_to_signed_int(payload, self.context.i64_type(), "payload_to_int")
+                .unwrap()
+                .into()
         } else {
-            (self.get_float_format_string(), value)
+            // Runtime check needed - for simplicity, always print as float
+            // (proper implementation would use phi nodes or conditional blocks)
+            payload.into()
         };
 
         self.builder
