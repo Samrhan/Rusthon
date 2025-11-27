@@ -2,12 +2,9 @@ use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt, UnaryOp};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::passes::{PassManager, PassManagerBuilder};
-use inkwell::values::{
-    FloatValue, FunctionValue, IntValue, IntValue as PyObjectValue, PointerValue,
-};
+use inkwell::passes::PassManager;
+use inkwell::values::{FloatValue, FunctionValue, IntValue, PointerValue};
 use inkwell::FloatPredicate;
-use inkwell::OptimizationLevel;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -95,12 +92,9 @@ impl<'ctx> Compiler<'ctx> {
             .builder
             .build_or(qnan_const, tag_shifted, "with_tag")
             .unwrap();
-        let pyobject = self
-            .builder
+        self.builder
             .build_or(with_tag, payload, "pyobject_int")
-            .unwrap();
-
-        pyobject
+            .unwrap()
     }
 
     /// Creates a PyObject value from a float using NaN-boxing
@@ -109,7 +103,7 @@ impl<'ctx> Compiler<'ctx> {
         // For floats, we store them directly (not NaN-boxed)
         // Just bitcast f64 to i64
         self.builder
-            .build_bitcast(value, self.context.i64_type(), "float_as_i64")
+            .build_bit_cast(value, self.context.i64_type(), "float_as_i64")
             .unwrap()
             .into_int_value()
     }
@@ -132,12 +126,9 @@ impl<'ctx> Compiler<'ctx> {
             .builder
             .build_or(qnan_const, tag_shifted, "with_tag")
             .unwrap();
-        let pyobject = self
-            .builder
+        self.builder
             .build_or(with_tag, payload, "pyobject_bool")
-            .unwrap();
-
-        pyobject
+            .unwrap()
     }
 
     /// Creates a PyObject value from a string pointer using NaN-boxing
@@ -165,12 +156,9 @@ impl<'ctx> Compiler<'ctx> {
             .builder
             .build_or(qnan_const, tag_shifted, "with_tag")
             .unwrap();
-        let pyobject = self
-            .builder
+        self.builder
             .build_or(with_tag, payload, "pyobject_string")
-            .unwrap();
-
-        pyobject
+            .unwrap()
     }
 
     /// Extracts a string pointer from a PyObject
@@ -220,12 +208,9 @@ impl<'ctx> Compiler<'ctx> {
             .builder
             .build_or(qnan_const, tag_shifted, "with_tag")
             .unwrap();
-        let pyobject = self
-            .builder
+        self.builder
             .build_or(with_tag, payload, "pyobject_list")
-            .unwrap();
-
-        pyobject
+            .unwrap()
     }
 
     /// Extracts a list pointer and length from a PyObject
@@ -256,6 +241,122 @@ impl<'ctx> Compiler<'ctx> {
         let len = self.context.i64_type().const_int(0, false);
 
         (ptr, len)
+    }
+
+    /// Reconstructs a PyObject from a tag and payload
+    /// tag: IntValue (i64) representing the type tag (0=INT, 1=FLOAT, 2=BOOL, 3=STRING, 4=LIST)
+    /// payload: FloatValue representing the payload as f64
+    /// Returns: IntValue (i64) representing the NaN-boxed PyObject
+    fn create_pyobject_from_tag_and_payload(
+        &self,
+        tag: IntValue<'ctx>,
+        payload: FloatValue<'ctx>,
+    ) -> IntValue<'ctx> {
+        let float_tag = self
+            .context
+            .i64_type()
+            .const_int(TYPE_TAG_FLOAT as u64, false);
+        let is_float = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, tag, float_tag, "is_float_tag")
+            .unwrap();
+
+        // For floats: just bitcast f64 to i64
+        let float_result = self
+            .builder
+            .build_bit_cast(payload, self.context.i64_type(), "float_to_i64")
+            .unwrap()
+            .into_int_value();
+
+        // For non-floats: Convert back from external tag to internal tag, then NaN-box
+        // TYPE_TAG_INT (0) -> TAG_INT (0)
+        // TYPE_TAG_BOOL (2) -> TAG_BOOL (1)
+        // TYPE_TAG_STRING (3) -> TAG_STRING (2)
+        // TYPE_TAG_LIST (4) -> TAG_LIST (3)
+        let bool_tag = self
+            .context
+            .i64_type()
+            .const_int(TYPE_TAG_BOOL as u64, false);
+        let string_tag = self
+            .context
+            .i64_type()
+            .const_int(TYPE_TAG_STRING as u64, false);
+        let list_tag = self
+            .context
+            .i64_type()
+            .const_int(TYPE_TAG_LIST as u64, false);
+
+        let is_bool = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, tag, bool_tag, "is_bool")
+            .unwrap();
+        let is_string = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, tag, string_tag, "is_string")
+            .unwrap();
+        let is_list = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::EQ, tag, list_tag, "is_list")
+            .unwrap();
+
+        let internal_tag_1 = self.context.i64_type().const_int(TAG_BOOL, false);
+        let internal_tag_2 = self.context.i64_type().const_int(TAG_STRING, false);
+        let internal_tag_3 = self.context.i64_type().const_int(TAG_LIST, false);
+        let internal_tag_0 = self.context.i64_type().const_int(TAG_INT, false);
+
+        let internal_tag_temp1 = self
+            .builder
+            .build_select(is_bool, internal_tag_1, internal_tag_0, "tag_temp1")
+            .unwrap()
+            .into_int_value();
+        let internal_tag_temp2 = self
+            .builder
+            .build_select(is_string, internal_tag_2, internal_tag_temp1, "tag_temp2")
+            .unwrap()
+            .into_int_value();
+        let internal_tag = self
+            .builder
+            .build_select(is_list, internal_tag_3, internal_tag_temp2, "internal_tag")
+            .unwrap()
+            .into_int_value();
+
+        // Convert payload from f64 to i64 bits
+        let payload_i64 = self
+            .builder
+            .build_float_to_signed_int(payload, self.context.i64_type(), "payload_to_i64")
+            .unwrap();
+
+        // Mask to 48 bits
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload_masked = self
+            .builder
+            .build_and(payload_i64, payload_mask, "payload_masked")
+            .unwrap();
+
+        // Build NaN-boxed value: QNAN | (tag << 48) | payload
+        let tag_shifted = self
+            .builder
+            .build_left_shift(
+                internal_tag,
+                self.context.i64_type().const_int(48, false),
+                "tag_shifted",
+            )
+            .unwrap();
+        let qnan_const = self.context.i64_type().const_int(QNAN, false);
+        let with_qnan = self
+            .builder
+            .build_or(qnan_const, tag_shifted, "with_qnan")
+            .unwrap();
+        let nanboxed_result = self
+            .builder
+            .build_or(with_qnan, payload_masked, "nanboxed")
+            .unwrap();
+
+        // Select between float and NaN-boxed based on tag
+        self.builder
+            .build_select(is_float, float_result, nanboxed_result, "pyobject")
+            .unwrap()
+            .into_int_value()
     }
 
     /// Checks if a PyObject is a float (not NaN-boxed)
@@ -381,7 +482,7 @@ impl<'ctx> Compiler<'ctx> {
         // If it's a float, bitcast i64 to f64
         let as_float = self
             .builder
-            .build_bitcast(pyobject, self.context.f64_type(), "i64_to_f64")
+            .build_bit_cast(pyobject, self.context.f64_type(), "i64_to_f64")
             .unwrap()
             .into_float_value();
 
@@ -448,22 +549,11 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Creates and configures an LLVM optimization pass manager
+    /// Note: LLVM 18 deprecated the old pass manager API used here.
+    /// TODO: Migrate to new pass manager API when inkwell provides bindings.
+    /// For now, optimizations are disabled.
     fn create_optimization_passes(&self) -> PassManager<FunctionValue<'ctx>> {
-        let pass_manager_builder = PassManagerBuilder::create();
-        pass_manager_builder.set_optimization_level(OptimizationLevel::Default);
-
         let fpm = PassManager::create(&self.module);
-
-        // Add standard optimization passes
-        fpm.add_instruction_combining_pass();
-        fpm.add_reassociate_pass();
-        fpm.add_gvn_pass();
-        fpm.add_cfg_simplification_pass();
-        fpm.add_promote_memory_to_register_pass();
-        fpm.add_basic_alias_analysis_pass();
-        fpm.add_function_inlining_pass();
-        fpm.add_tail_call_elimination_pass();
-
         fpm.initialize();
         fpm
     }
@@ -498,13 +588,18 @@ impl<'ctx> Compiler<'ctx> {
             self.compile_statement(stmt, main_fn)?;
         }
 
-        // Cleanup: free all allocated strings from the arena
-        let free_fn = self.add_free();
-        for str_ptr in &self.string_arena {
-            self.builder
-                .build_call(free_fn, &[(*str_ptr).into()], "free_str")
-                .unwrap();
-        }
+        // TODO: Fix string cleanup - currently disabled due to LLVM dominance issues
+        // String pointers allocated in conditional branches don't dominate the cleanup code
+        // This causes LLVM verification errors. Proper fix would be to use RAII or track
+        // which strings can be safely freed in the main block.
+        // For now, this is a known memory leak in generated programs.
+        //
+        // let free_fn = self.add_free();
+        // for str_ptr in &self.string_arena {
+        //     self.builder
+        //         .build_call(free_fn, &[(*str_ptr).into()], "free_str")
+        //         .unwrap();
+        // }
 
         self.builder
             .build_return(Some(&i32_type.const_int(0, false)))
@@ -762,17 +857,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Preserve the tag from the loop variable
                 let tag = self.extract_tag(var_val);
-                let mut new_val = pyobject_type.get_undef();
-                new_val = self
-                    .builder
-                    .build_insert_value(new_val, tag, 0, "insert_tag")
-                    .unwrap()
-                    .into_int_value();
-                new_val = self
-                    .builder
-                    .build_insert_value(new_val, new_payload, 1, "insert_payload")
-                    .unwrap()
-                    .into_int_value();
+                let new_val = self.create_pyobject_from_tag_and_payload(tag, new_payload);
 
                 self.builder.build_store(ptr, new_val).unwrap();
                 self.builder
@@ -842,7 +927,7 @@ impl<'ctx> Compiler<'ctx> {
                 let rhs_tag = self.extract_tag(rhs_obj);
                 let string_tag_const = self
                     .context
-                    .i8_type()
+                    .i64_type()
                     .const_int(TYPE_TAG_STRING as u64, false);
 
                 // Handle string concatenation for Add operator
@@ -882,6 +967,8 @@ impl<'ctx> Compiler<'ctx> {
                     let arithmetic_block =
                         self.context.append_basic_block(current_fn, "arithmetic");
                     let merge_block = self.context.append_basic_block(current_fn, "add_merge");
+
+                    let pyobject_type = self.create_pyobject_type();
 
                     // Branch based on whether both are strings
                     self.builder
@@ -999,7 +1086,7 @@ impl<'ctx> Compiler<'ctx> {
                     // Check if either operand is a float (tag == TYPE_TAG_FLOAT)
                     let float_tag_const = self
                         .context
-                        .i8_type()
+                        .i64_type()
                         .const_int(TYPE_TAG_FLOAT as u64, false);
                     let lhs_is_float = self
                         .builder
@@ -1032,10 +1119,13 @@ impl<'ctx> Compiler<'ctx> {
                         .unwrap();
 
                     // Select the result tag based on whether either operand is float
-                    let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
+                    let int_tag = self
+                        .context
+                        .i64_type()
+                        .const_int(TYPE_TAG_INT as u64, false);
                     let float_tag = self
                         .context
-                        .i8_type()
+                        .i64_type()
                         .const_int(TYPE_TAG_FLOAT as u64, false);
                     let result_tag = self
                         .builder
@@ -1044,18 +1134,8 @@ impl<'ctx> Compiler<'ctx> {
                         .into_int_value();
 
                     // Create result PyObject
-                    let pyobject_type = self.create_pyobject_type();
-                    let mut arithmetic_result = pyobject_type.get_undef();
-                    arithmetic_result = self
-                        .builder
-                        .build_insert_value(arithmetic_result, result_tag, 0, "insert_tag")
-                        .unwrap()
-                        .into_int_value();
-                    arithmetic_result = self
-                        .builder
-                        .build_insert_value(arithmetic_result, result_payload, 1, "insert_payload")
-                        .unwrap()
-                        .into_int_value();
+                    let arithmetic_result =
+                        self.create_pyobject_from_tag_and_payload(result_tag, result_payload);
                     self.builder
                         .build_unconditional_branch(merge_block)
                         .unwrap();
@@ -1185,10 +1265,13 @@ impl<'ctx> Compiler<'ctx> {
                         };
 
                         // Select the result tag based on whether either operand is float
-                        let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
+                        let int_tag = self
+                            .context
+                            .i64_type()
+                            .const_int(TYPE_TAG_INT as u64, false);
                         let float_tag = self
                             .context
-                            .i8_type()
+                            .i64_type()
                             .const_int(TYPE_TAG_FLOAT as u64, false);
                         let result_tag = self
                             .builder
@@ -1197,18 +1280,8 @@ impl<'ctx> Compiler<'ctx> {
                             .into_int_value();
 
                         // Create result PyObject
-                        let pyobject_type = self.create_pyobject_type();
-                        let mut result_obj = pyobject_type.get_undef();
-                        result_obj = self
-                            .builder
-                            .build_insert_value(result_obj, result_tag, 0, "insert_tag")
-                            .unwrap()
-                            .into_int_value();
-                        result_obj = self
-                            .builder
-                            .build_insert_value(result_obj, result_payload, 1, "insert_payload")
-                            .unwrap()
-                            .into_int_value();
+                        let result_obj =
+                            self.create_pyobject_from_tag_and_payload(result_tag, result_payload);
 
                         Ok(result_obj)
                     }
@@ -1238,8 +1311,8 @@ impl<'ctx> Compiler<'ctx> {
                 // Add default arguments for missing parameters
                 // Only iterate through defaults that correspond to parameters we didn't provide
                 if num_provided_args < defaults.len() {
-                    for i in num_provided_args..defaults.len() {
-                        if let Some(default_expr) = &defaults[i] {
+                    for (i, default_opt) in defaults.iter().enumerate().skip(num_provided_args) {
+                        if let Some(default_expr) = default_opt {
                             let default_pyobj = self.compile_expression(default_expr)?;
                             compiled_args.push(default_pyobj.into());
                         } else {
@@ -1301,7 +1374,7 @@ impl<'ctx> Compiler<'ctx> {
                 // Check if the argument is a string
                 let string_tag_const = self
                     .context
-                    .i8_type()
+                    .i64_type()
                     .const_int(TYPE_TAG_STRING as u64, false);
                 let is_string = self
                     .builder
@@ -1466,18 +1539,7 @@ impl<'ctx> Compiler<'ctx> {
 
                         // Preserve the type tag from the operand
                         let tag = self.extract_tag(operand_obj);
-                        let pyobject_type = self.create_pyobject_type();
-                        let mut result_obj = pyobject_type.get_undef();
-                        result_obj = self
-                            .builder
-                            .build_insert_value(result_obj, tag, 0, "insert_tag")
-                            .unwrap()
-                            .into_int_value();
-                        result_obj = self
-                            .builder
-                            .build_insert_value(result_obj, result, 1, "insert_payload")
-                            .unwrap()
-                            .into_int_value();
+                        let result_obj = self.create_pyobject_from_tag_and_payload(tag, result);
 
                         Ok(result_obj)
                     }
@@ -1514,7 +1576,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Allocate memory for the array of PyObjects
                 // size = list_len * sizeof(PyObject)
-                let pyobject_size = pyobject_type.size_of().unwrap();
+                let pyobject_size = pyobject_type.size_of();
                 let element_count = self.context.i64_type().const_int(list_len as u64, false);
                 let total_size = self
                     .builder
@@ -1802,10 +1864,13 @@ impl<'ctx> Compiler<'ctx> {
         let payload = self.extract_payload(pyobject);
 
         // Check the tag to determine print type
-        let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
+        let int_tag = self
+            .context
+            .i64_type()
+            .const_int(TYPE_TAG_INT as u64, false);
         let string_tag = self
             .context
-            .i8_type()
+            .i64_type()
             .const_int(TYPE_TAG_STRING as u64, false);
 
         let is_int = self

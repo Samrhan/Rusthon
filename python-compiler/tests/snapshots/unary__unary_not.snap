@@ -1,0 +1,77 @@
+---
+source: tests/unary.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+@string_format_string = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
+
+define i32 @main() {
+entry:
+  %x = alloca i64, align 8
+  store i64 9221401712017801217, ptr %x, align 4
+  %x1 = load i64, ptr %x, align 4
+  %check_qnan = and i64 %x1, 9221120237041090560
+  %is_float = icmp ne i64 %check_qnan, 9221120237041090560
+  %i64_to_f64 = bitcast i64 %x1 to double
+  %extract_payload = and i64 %x1, 281474976710655
+  %sign_bit = lshr i64 %extract_payload, 47
+  %is_negative = icmp eq i64 %sign_bit, 1
+  %sign_extend = or i64 %extract_payload, -281474976710656
+  %signed_payload = select i1 %is_negative, i64 %sign_extend, i64 %extract_payload
+  %payload_to_f64 = sitofp i64 %signed_payload to double
+  %final_payload = select i1 %is_float, double %i64_to_f64, double %payload_to_f64
+  %is_zero = fcmp oeq double %final_payload, 0.000000e+00
+  %bool_payload = zext i1 %is_zero to i64
+  %pyobject_bool = or i64 9221401712017801216, %bool_payload
+  %check_qnan2 = and i64 %pyobject_bool, 9221120237041090560
+  %is_float3 = icmp ne i64 %check_qnan2, 9221120237041090560
+  %tag_bits = and i64 %pyobject_bool, 1970324836974592
+  %tag = lshr i64 %tag_bits, 48
+  %is_bool = icmp eq i64 %tag, 1
+  %is_string = icmp eq i64 %tag, 2
+  %is_list = icmp eq i64 %tag, 3
+  %map_bool = select i1 %is_bool, i64 2, i64 %tag
+  %map_string = select i1 %is_string, i64 3, i64 %map_bool
+  %map_list = select i1 %is_list, i64 4, i64 %map_string
+  %final_tag = select i1 %is_float3, i64 1, i64 %map_list
+  %check_qnan4 = and i64 %pyobject_bool, 9221120237041090560
+  %is_float5 = icmp ne i64 %check_qnan4, 9221120237041090560
+  %i64_to_f646 = bitcast i64 %pyobject_bool to double
+  %extract_payload7 = and i64 %pyobject_bool, 281474976710655
+  %sign_bit8 = lshr i64 %extract_payload7, 47
+  %is_negative9 = icmp eq i64 %sign_bit8, 1
+  %sign_extend10 = or i64 %extract_payload7, -281474976710656
+  %signed_payload11 = select i1 %is_negative9, i64 %sign_extend10, i64 %extract_payload7
+  %payload_to_f6412 = sitofp i64 %signed_payload11 to double
+  %final_payload13 = select i1 %is_float5, double %i64_to_f646, double %payload_to_f6412
+  %is_int = icmp eq i64 %final_tag, 0
+  %is_string14 = icmp eq i64 %final_tag, 3
+  br i1 %is_string14, label %print_string, label %check_int
+
+check_int:                                        ; preds = %entry
+  br i1 %is_int, label %print_int, label %print_float
+
+print_int:                                        ; preds = %check_int
+  %to_int = fptosi double %final_payload13 to i64
+  %printf_int = call i32 (ptr, ...) @printf(ptr @int_format_string, i64 %to_int)
+  br label %print_end
+
+print_float:                                      ; preds = %check_int
+  %printf_float = call i32 (ptr, ...) @printf(ptr @float_format_string, double %final_payload13)
+  br label %print_end
+
+print_string:                                     ; preds = %entry
+  %extract_ptr_payload = and i64 %pyobject_bool, 281474976710655
+  %payload_to_ptr = inttoptr i64 %extract_ptr_payload to ptr
+  %printf_string = call i32 (ptr, ...) @printf(ptr @string_format_string, ptr %payload_to_ptr)
+  br label %print_end
+
+print_end:                                        ; preds = %print_string, %print_float, %print_int
+  ret i32 0
+}
+
+declare i32 @printf(ptr, ...)

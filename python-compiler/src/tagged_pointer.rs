@@ -40,13 +40,10 @@
 /// - Integers limited to ±140,737,488,355,328 (48-bit)
 /// - Pointers limited to 48-bit (acceptable on x86-64)
 /// - Slightly more complex implementation than struct approach
-use std::mem;
-
 // Bit patterns for NaN boxing
 const QNAN: u64 = 0x7FF8_0000_0000_0000;
 const TAG_MASK: u64 = 0x0007_0000_0000_0000;
 const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
-const SIGN_BIT: u64 = 0x8000_0000_0000_0000;
 
 // Type tags (3 bits)
 const TAG_INT: u64 = 0;
@@ -236,6 +233,7 @@ impl TaggedPointer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::mem;
 
     #[test]
     fn test_integer_boxing() {
@@ -254,10 +252,10 @@ mod tests {
 
     #[test]
     fn test_float_boxing() {
-        let obj = TaggedPointer::from_float(3.14159);
+        let obj = TaggedPointer::from_float(123.456);
         assert!(obj.is_float());
         assert!(!obj.is_int());
-        assert_eq!(obj.as_float(), 3.14159);
+        assert_eq!(obj.as_float(), 123.456);
     }
 
     #[test]
@@ -267,8 +265,8 @@ mod tests {
 
         assert!(obj_true.is_bool());
         assert!(obj_false.is_bool());
-        assert_eq!(obj_true.as_bool(), true);
-        assert_eq!(obj_false.as_bool(), false);
+        assert!(obj_true.as_bool());
+        assert!(!obj_false.as_bool());
     }
 
     #[test]
