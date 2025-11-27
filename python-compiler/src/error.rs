@@ -1,7 +1,7 @@
+use crate::codegen::CodeGenError;
+use crate::lowering::LoweringError;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use rustpython_parser::ParseError;
-use crate::lowering::LoweringError;
-use crate::codegen::CodeGenError;
 
 /// Display a parse error with ariadne formatting
 pub fn display_parse_error(source: &str, filename: &str, error: &ParseError) {

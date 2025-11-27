@@ -3,7 +3,9 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::passes::{PassManager, PassManagerBuilder};
-use inkwell::values::{FunctionValue, FloatValue, IntValue, PointerValue, IntValue as PyObjectValue};
+use inkwell::values::{
+    FloatValue, FunctionValue, IntValue, IntValue as PyObjectValue, PointerValue,
+};
 use inkwell::FloatPredicate;
 use inkwell::OptimizationLevel;
 use std::collections::HashMap;
@@ -44,7 +46,10 @@ pub struct Compiler<'ctx> {
     functions: HashMap<String, FunctionValue<'ctx>>,
     function_defaults: HashMap<String, Vec<Option<IRExpr>>>,
     // Stack of (continue_target, break_target) basic blocks for nested loops
-    loop_stack: Vec<(inkwell::basic_block::BasicBlock<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)>,
+    loop_stack: Vec<(
+        inkwell::basic_block::BasicBlock<'ctx>,
+        inkwell::basic_block::BasicBlock<'ctx>,
+    )>,
     // Arena for string allocations - stores pointers to allocated strings for cleanup
     string_arena: Vec<PointerValue<'ctx>>,
 }
@@ -76,7 +81,8 @@ impl<'ctx> Compiler<'ctx> {
         // NaN-box: QNAN | (TAG_INT << 48) | (value & PAYLOAD_MASK)
         // Truncate to 48 bits (sign-extended)
         let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
-        let payload = self.builder
+        let payload = self
+            .builder
             .build_and(value, payload_mask, "int_payload")
             .unwrap();
 
@@ -85,10 +91,12 @@ impl<'ctx> Compiler<'ctx> {
 
         // Combine: QNAN | tag | payload
         let qnan_const = self.context.i64_type().const_int(QNAN, false);
-        let with_tag = self.builder
+        let with_tag = self
+            .builder
             .build_or(qnan_const, tag_shifted, "with_tag")
             .unwrap();
-        let pyobject = self.builder
+        let pyobject = self
+            .builder
             .build_or(with_tag, payload, "pyobject_int")
             .unwrap();
 
@@ -110,7 +118,8 @@ impl<'ctx> Compiler<'ctx> {
     fn create_pyobject_bool(&self, value: IntValue<'ctx>) -> IntValue<'ctx> {
         // NaN-box: QNAN | (TAG_BOOL << 48) | (0 or 1)
         // Zero-extend i1 to i64
-        let payload = self.builder
+        let payload = self
+            .builder
             .build_int_z_extend(value, self.context.i64_type(), "bool_payload")
             .unwrap();
 
@@ -119,10 +128,12 @@ impl<'ctx> Compiler<'ctx> {
 
         // Combine: QNAN | tag | payload
         let qnan_const = self.context.i64_type().const_int(QNAN, false);
-        let with_tag = self.builder
+        let with_tag = self
+            .builder
             .build_or(qnan_const, tag_shifted, "with_tag")
             .unwrap();
-        let pyobject = self.builder
+        let pyobject = self
+            .builder
             .build_or(with_tag, payload, "pyobject_bool")
             .unwrap();
 
@@ -133,13 +144,15 @@ impl<'ctx> Compiler<'ctx> {
     fn create_pyobject_string(&self, ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
         // NaN-box: QNAN | (TAG_STRING << 48) | (ptr & PAYLOAD_MASK)
         // Convert pointer to i64
-        let ptr_as_int = self.builder
+        let ptr_as_int = self
+            .builder
             .build_ptr_to_int(ptr, self.context.i64_type(), "ptr_to_int")
             .unwrap();
 
         // Mask to 48 bits
         let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
-        let payload = self.builder
+        let payload = self
+            .builder
             .build_and(ptr_as_int, payload_mask, "ptr_payload")
             .unwrap();
 
@@ -148,10 +161,12 @@ impl<'ctx> Compiler<'ctx> {
 
         // Combine: QNAN | tag | payload
         let qnan_const = self.context.i64_type().const_int(QNAN, false);
-        let with_tag = self.builder
+        let with_tag = self
+            .builder
             .build_or(qnan_const, tag_shifted, "with_tag")
             .unwrap();
-        let pyobject = self.builder
+        let pyobject = self
+            .builder
             .build_or(with_tag, payload, "pyobject_string")
             .unwrap();
 
@@ -163,7 +178,8 @@ impl<'ctx> Compiler<'ctx> {
     fn extract_string_ptr(&self, pyobject: IntValue<'ctx>) -> PointerValue<'ctx> {
         // Extract payload (lower 48 bits)
         let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
-        let payload = self.builder
+        let payload = self
+            .builder
             .build_and(pyobject, payload_mask, "extract_ptr_payload")
             .unwrap();
 
@@ -172,7 +188,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_int_to_ptr(
                 payload,
                 self.context.ptr_type(inkwell::AddressSpace::default()),
-                "payload_to_ptr"
+                "payload_to_ptr",
             )
             .unwrap()
     }
@@ -183,13 +199,15 @@ impl<'ctx> Compiler<'ctx> {
     fn create_pyobject_list(&self, ptr: PointerValue<'ctx>, _len: usize) -> IntValue<'ctx> {
         // For now, just store the pointer (length tracking is a TODO)
         // NaN-box: QNAN | (TAG_LIST << 48) | (ptr & PAYLOAD_MASK)
-        let ptr_as_int = self.builder
+        let ptr_as_int = self
+            .builder
             .build_ptr_to_int(ptr, self.context.i64_type(), "ptr_to_int")
             .unwrap();
 
         // Mask to 48 bits
         let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
-        let payload = self.builder
+        let payload = self
+            .builder
             .build_and(ptr_as_int, payload_mask, "list_ptr_payload")
             .unwrap();
 
@@ -198,10 +216,12 @@ impl<'ctx> Compiler<'ctx> {
 
         // Combine: QNAN | tag | payload
         let qnan_const = self.context.i64_type().const_int(QNAN, false);
-        let with_tag = self.builder
+        let with_tag = self
+            .builder
             .build_or(qnan_const, tag_shifted, "with_tag")
             .unwrap();
-        let pyobject = self.builder
+        let pyobject = self
+            .builder
             .build_or(with_tag, payload, "pyobject_list")
             .unwrap();
 
@@ -211,19 +231,24 @@ impl<'ctx> Compiler<'ctx> {
     /// Extracts a list pointer and length from a PyObject
     /// Assumes the PyObject has a LIST tag
     /// Note: Length extraction is simplified - actual length should be stored with the array
-    fn extract_list_ptr_and_len(&self, pyobject: IntValue<'ctx>) -> (PointerValue<'ctx>, IntValue<'ctx>) {
+    fn extract_list_ptr_and_len(
+        &self,
+        pyobject: IntValue<'ctx>,
+    ) -> (PointerValue<'ctx>, IntValue<'ctx>) {
         // Extract payload (lower 48 bits)
         let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
-        let payload = self.builder
+        let payload = self
+            .builder
             .build_and(pyobject, payload_mask, "extract_list_payload")
             .unwrap();
 
         // Convert to pointer
-        let ptr = self.builder
+        let ptr = self
+            .builder
             .build_int_to_ptr(
                 payload,
                 self.context.ptr_type(inkwell::AddressSpace::default()),
-                "payload_to_list_ptr"
+                "payload_to_list_ptr",
             )
             .unwrap();
 
@@ -237,16 +262,13 @@ impl<'ctx> Compiler<'ctx> {
     fn is_float(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
         // A value is a float if (value & QNAN) != QNAN
         let qnan_const = self.context.i64_type().const_int(QNAN, false);
-        let masked = self.builder
+        let masked = self
+            .builder
             .build_and(pyobject, qnan_const, "check_qnan")
             .unwrap();
-        let is_not_qnan = self.builder
-            .build_int_compare(
-                inkwell::IntPredicate::NE,
-                masked,
-                qnan_const,
-                "is_float"
-            )
+        let is_not_qnan = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::NE, masked, qnan_const, "is_float")
             .unwrap();
         is_not_qnan
     }
@@ -260,11 +282,18 @@ impl<'ctx> Compiler<'ctx> {
         // If not NaN-boxed (i.e., it's a float), return TYPE_TAG_FLOAT (1)
         // Otherwise extract tag from bits 48-50
         let tag_mask = self.context.i64_type().const_int(TAG_MASK, false);
-        let tag_bits = self.builder
+        let tag_bits = self
+            .builder
             .build_and(pyobject, tag_mask, "tag_bits")
             .unwrap();
-        let tag_shifted = self.builder
-            .build_right_shift(tag_bits, self.context.i64_type().const_int(48, false), false, "tag")
+        let tag_shifted = self
+            .builder
+            .build_right_shift(
+                tag_bits,
+                self.context.i64_type().const_int(48, false),
+                false,
+                "tag",
+            )
             .unwrap();
 
         // Convert internal tag to external tag
@@ -272,52 +301,70 @@ impl<'ctx> Compiler<'ctx> {
         // TAG_BOOL (1) -> TYPE_TAG_BOOL (2)
         // TAG_STRING (2) -> TYPE_TAG_STRING (3)
         // TAG_LIST (3) -> TYPE_TAG_LIST (4)
-        let tag_map_bool = self.context.i64_type().const_int(TYPE_TAG_BOOL as u64, false);
-        let tag_map_string = self.context.i64_type().const_int(TYPE_TAG_STRING as u64, false);
-        let tag_map_list = self.context.i64_type().const_int(TYPE_TAG_LIST as u64, false);
+        let tag_map_bool = self
+            .context
+            .i64_type()
+            .const_int(TYPE_TAG_BOOL as u64, false);
+        let tag_map_string = self
+            .context
+            .i64_type()
+            .const_int(TYPE_TAG_STRING as u64, false);
+        let tag_map_list = self
+            .context
+            .i64_type()
+            .const_int(TYPE_TAG_LIST as u64, false);
 
         // Select based on tag value
-        let is_bool = self.builder
+        let is_bool = self
+            .builder
             .build_int_compare(
                 inkwell::IntPredicate::EQ,
                 tag_shifted,
                 self.context.i64_type().const_int(TAG_BOOL, false),
-                "is_bool"
+                "is_bool",
             )
             .unwrap();
-        let is_string = self.builder
+        let is_string = self
+            .builder
             .build_int_compare(
                 inkwell::IntPredicate::EQ,
                 tag_shifted,
                 self.context.i64_type().const_int(TAG_STRING, false),
-                "is_string"
+                "is_string",
             )
             .unwrap();
-        let is_list = self.builder
+        let is_list = self
+            .builder
             .build_int_compare(
                 inkwell::IntPredicate::EQ,
                 tag_shifted,
                 self.context.i64_type().const_int(TAG_LIST, false),
-                "is_list"
+                "is_list",
             )
             .unwrap();
 
         // Build the mapped tag
-        let mapped_tag = self.builder
+        let mapped_tag = self
+            .builder
             .build_select(is_bool, tag_map_bool, tag_shifted, "map_bool")
             .unwrap()
             .into_int_value();
-        let mapped_tag = self.builder
+        let mapped_tag = self
+            .builder
             .build_select(is_string, tag_map_string, mapped_tag, "map_string")
             .unwrap()
             .into_int_value();
-        let mapped_tag = self.builder
+        let mapped_tag = self
+            .builder
             .build_select(is_list, tag_map_list, mapped_tag, "map_list")
             .unwrap()
             .into_int_value();
 
         // If it's a float, return TYPE_TAG_FLOAT, otherwise return mapped tag
-        let float_tag = self.context.i64_type().const_int(TYPE_TAG_FLOAT as u64, false);
+        let float_tag = self
+            .context
+            .i64_type()
+            .const_int(TYPE_TAG_FLOAT as u64, false);
         self.builder
             .build_select(is_float_val, float_tag, mapped_tag, "final_tag")
             .unwrap()
@@ -332,47 +379,54 @@ impl<'ctx> Compiler<'ctx> {
         let is_float_val = self.is_float(pyobject);
 
         // If it's a float, bitcast i64 to f64
-        let as_float = self.builder
+        let as_float = self
+            .builder
             .build_bitcast(pyobject, self.context.f64_type(), "i64_to_f64")
             .unwrap()
             .into_float_value();
 
         // Otherwise, extract lower 48 bits and convert to f64
         let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
-        let payload_int = self.builder
+        let payload_int = self
+            .builder
             .build_and(pyobject, payload_mask, "extract_payload")
             .unwrap();
 
         // Sign-extend from 48 bits to 64 bits for integers
-        let sign_bit = self.builder
+        let sign_bit = self
+            .builder
             .build_right_shift(
                 payload_int,
                 self.context.i64_type().const_int(47, false),
                 false,
-                "sign_bit"
+                "sign_bit",
             )
             .unwrap();
-        let is_negative = self.builder
+        let is_negative = self
+            .builder
             .build_int_compare(
                 inkwell::IntPredicate::EQ,
                 sign_bit,
                 self.context.i64_type().const_int(1, false),
-                "is_negative"
+                "is_negative",
             )
             .unwrap();
 
         // If negative, fill upper bits with 1s
         let sign_extension = self.context.i64_type().const_int(!PAYLOAD_MASK, false);
-        let extended = self.builder
+        let extended = self
+            .builder
             .build_or(payload_int, sign_extension, "sign_extend")
             .unwrap();
-        let signed_payload = self.builder
+        let signed_payload = self
+            .builder
             .build_select(is_negative, extended, payload_int, "signed_payload")
             .unwrap()
             .into_int_value();
 
         // Convert to f64
-        let payload_as_float = self.builder
+        let payload_as_float = self
+            .builder
             .build_signed_int_to_float(signed_payload, self.context.f64_type(), "payload_to_f64")
             .unwrap();
 
@@ -416,13 +470,19 @@ impl<'ctx> Compiler<'ctx> {
 
     pub fn compile_program(mut self, program: &[IRStmt]) -> Result<String, CodeGenError> {
         // Separate function definitions from top-level statements
-        let (functions, top_level): (Vec<_>, Vec<_>) = program.iter().partition(|stmt| {
-            matches!(stmt, IRStmt::FunctionDef { .. })
-        });
+        let (functions, top_level): (Vec<_>, Vec<_>) = program
+            .iter()
+            .partition(|stmt| matches!(stmt, IRStmt::FunctionDef { .. }));
 
         // Compile all function definitions first
         for func_stmt in functions {
-            if let IRStmt::FunctionDef { name, params, defaults, body } = func_stmt {
+            if let IRStmt::FunctionDef {
+                name,
+                params,
+                defaults,
+                body,
+            } = func_stmt
+            {
                 self.compile_function_def(name, params, defaults, body)?;
             }
         }
@@ -482,7 +542,11 @@ impl<'ctx> Compiler<'ctx> {
                     // print() with no arguments just prints a newline
                     let printf = self.add_printf();
                     self.builder
-                        .build_call(printf, &[self.get_newline_format_string().into()], "printf_newline")
+                        .build_call(
+                            printf,
+                            &[self.get_newline_format_string().into()],
+                            "printf_newline",
+                        )
                         .unwrap();
                 } else {
                     // Print each argument
@@ -497,7 +561,11 @@ impl<'ctx> Compiler<'ctx> {
                         if !is_last {
                             let printf = self.add_printf();
                             self.builder
-                                .build_call(printf, &[self.get_space_format_string().into()], "printf_space")
+                                .build_call(
+                                    printf,
+                                    &[self.get_space_format_string().into()],
+                                    "printf_space",
+                                )
                                 .unwrap();
                         }
                     }
@@ -520,7 +588,11 @@ impl<'ctx> Compiler<'ctx> {
                 // Function definitions are handled separately in compile_program
                 // This should not be reached during normal statement compilation
             }
-            IRStmt::If { condition, then_body, else_body } => {
+            IRStmt::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
                 // Compile the condition expression
                 let cond_pyobj = self.compile_expression(condition)?;
 
@@ -572,7 +644,9 @@ impl<'ctx> Compiler<'ctx> {
                 self.loop_stack.push((loop_cond_bb, loop_exit_bb));
 
                 // Jump to the condition check
-                self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+                self.builder
+                    .build_unconditional_branch(loop_cond_bb)
+                    .unwrap();
 
                 // Build the condition block
                 self.builder.position_at_end(loop_cond_bb);
@@ -594,7 +668,9 @@ impl<'ctx> Compiler<'ctx> {
                 // Only add branch if current block doesn't already have a terminator
                 let current_block = self.builder.get_insert_block().unwrap();
                 if current_block.get_terminator().is_none() {
-                    self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+                    self.builder
+                        .build_unconditional_branch(loop_cond_bb)
+                        .unwrap();
                 }
 
                 // Pop loop targets from the stack
@@ -603,7 +679,12 @@ impl<'ctx> Compiler<'ctx> {
                 // Continue building after the loop
                 self.builder.position_at_end(loop_exit_bb);
             }
-            IRStmt::For { var, start, end, body } => {
+            IRStmt::For {
+                var,
+                start,
+                end,
+                body,
+            } => {
                 // Compile for loop as: var = start; while var < end: body; var += 1
 
                 // Initialize loop variable
@@ -625,13 +706,16 @@ impl<'ctx> Compiler<'ctx> {
                 self.loop_stack.push((loop_incr_bb, loop_exit_bb));
 
                 // Jump to the condition check
-                self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+                self.builder
+                    .build_unconditional_branch(loop_cond_bb)
+                    .unwrap();
 
                 // Build the condition block (var < end)
                 self.builder.position_at_end(loop_cond_bb);
                 let end_val = self.compile_expression(end)?;
                 let pyobject_type = self.create_pyobject_type();
-                let var_val = self.builder
+                let var_val = self
+                    .builder
                     .build_load(pyobject_type, ptr, var)
                     .unwrap()
                     .into_int_value();
@@ -639,7 +723,8 @@ impl<'ctx> Compiler<'ctx> {
                 // Compare var < end
                 let var_payload = self.extract_payload(var_val);
                 let end_payload = self.extract_payload(end_val);
-                let cond_bool = self.builder
+                let cond_bool = self
+                    .builder
                     .build_float_compare(FloatPredicate::OLT, var_payload, end_payload, "for_cond")
                     .unwrap();
 
@@ -656,35 +741,43 @@ impl<'ctx> Compiler<'ctx> {
                 // Only add branch if current block doesn't already have a terminator
                 let current_block = self.builder.get_insert_block().unwrap();
                 if current_block.get_terminator().is_none() {
-                    self.builder.build_unconditional_branch(loop_incr_bb).unwrap();
+                    self.builder
+                        .build_unconditional_branch(loop_incr_bb)
+                        .unwrap();
                 }
 
                 // Build the increment block (var += 1)
                 self.builder.position_at_end(loop_incr_bb);
-                let var_val = self.builder
+                let var_val = self
+                    .builder
                     .build_load(pyobject_type, ptr, var)
                     .unwrap()
                     .into_int_value();
                 let var_payload = self.extract_payload(var_val);
                 let one = self.context.f64_type().const_float(1.0);
-                let new_payload = self.builder
+                let new_payload = self
+                    .builder
                     .build_float_add(var_payload, one, "for_incr")
                     .unwrap();
 
                 // Preserve the tag from the loop variable
                 let tag = self.extract_tag(var_val);
                 let mut new_val = pyobject_type.get_undef();
-                new_val = self.builder
+                new_val = self
+                    .builder
                     .build_insert_value(new_val, tag, 0, "insert_tag")
                     .unwrap()
                     .into_int_value();
-                new_val = self.builder
+                new_val = self
+                    .builder
                     .build_insert_value(new_val, new_payload, 1, "insert_payload")
                     .unwrap()
                     .into_int_value();
 
                 self.builder.build_store(ptr, new_val).unwrap();
-                self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
+                self.builder
+                    .build_unconditional_branch(loop_cond_bb)
+                    .unwrap();
 
                 // Pop loop targets from the stack
                 self.loop_stack.pop();
@@ -695,14 +788,18 @@ impl<'ctx> Compiler<'ctx> {
             IRStmt::Break => {
                 // Branch to the exit block of the current loop
                 if let Some((_, break_target)) = self.loop_stack.last() {
-                    self.builder.build_unconditional_branch(*break_target).unwrap();
+                    self.builder
+                        .build_unconditional_branch(*break_target)
+                        .unwrap();
                 }
                 // Note: Any code after break in the same block is unreachable
             }
             IRStmt::Continue => {
                 // Branch to the continue target (loop condition or increment) of the current loop
                 if let Some((continue_target, _)) = self.loop_stack.last() {
-                    self.builder.build_unconditional_branch(*continue_target).unwrap();
+                    self.builder
+                        .build_unconditional_branch(*continue_target)
+                        .unwrap();
                 }
                 // Note: Any code after continue in the same block is unreachable
             }
@@ -725,15 +822,14 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(self.create_pyobject_bool(bool_val))
             }
             IRExpr::Variable(name) => {
-                let ptr = self.variables
+                let ptr = self
+                    .variables
                     .get(name)
                     .ok_or_else(|| CodeGenError::UndefinedVariable(name.clone()))?;
 
                 // Variables are stored as PyObject (i64)
                 let pyobject_type = self.create_pyobject_type();
-                let loaded = self.builder
-                    .build_load(pyobject_type, *ptr, name)
-                    .unwrap();
+                let loaded = self.builder.build_load(pyobject_type, *ptr, name).unwrap();
 
                 Ok(loaded.into_int_value())
             }
@@ -744,29 +840,47 @@ impl<'ctx> Compiler<'ctx> {
                 // Extract tags to check types
                 let lhs_tag = self.extract_tag(lhs_obj);
                 let rhs_tag = self.extract_tag(rhs_obj);
-                let string_tag_const = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
+                let string_tag_const = self
+                    .context
+                    .i8_type()
+                    .const_int(TYPE_TAG_STRING as u64, false);
 
                 // Handle string concatenation for Add operator
                 if matches!(op, BinOp::Add) {
-                    let lhs_is_string = self.builder
-                        .build_int_compare(inkwell::IntPredicate::EQ, lhs_tag, string_tag_const, "lhs_is_string")
+                    let lhs_is_string = self
+                        .builder
+                        .build_int_compare(
+                            inkwell::IntPredicate::EQ,
+                            lhs_tag,
+                            string_tag_const,
+                            "lhs_is_string",
+                        )
                         .unwrap();
-                    let rhs_is_string = self.builder
-                        .build_int_compare(inkwell::IntPredicate::EQ, rhs_tag, string_tag_const, "rhs_is_string")
+                    let rhs_is_string = self
+                        .builder
+                        .build_int_compare(
+                            inkwell::IntPredicate::EQ,
+                            rhs_tag,
+                            string_tag_const,
+                            "rhs_is_string",
+                        )
                         .unwrap();
-                    let both_strings = self.builder
+                    let both_strings = self
+                        .builder
                         .build_and(lhs_is_string, rhs_is_string, "both_strings")
                         .unwrap();
 
                     // Get current function for creating basic blocks
-                    let current_fn = self.builder
+                    let current_fn = self
+                        .builder
                         .get_insert_block()
                         .unwrap()
                         .get_parent()
                         .unwrap();
 
                     let concat_block = self.context.append_basic_block(current_fn, "str_concat");
-                    let arithmetic_block = self.context.append_basic_block(current_fn, "arithmetic");
+                    let arithmetic_block =
+                        self.context.append_basic_block(current_fn, "arithmetic");
                     let merge_block = self.context.append_basic_block(current_fn, "add_merge");
 
                     // Branch based on whether both are strings
@@ -781,47 +895,56 @@ impl<'ctx> Compiler<'ctx> {
 
                     // Get lengths of both strings using strlen
                     let strlen_fn = self.add_strlen();
-                    let lhs_len_result = self.builder
+                    let lhs_len_result = self
+                        .builder
                         .build_call(strlen_fn, &[lhs_str_ptr.into()], "lhs_len")
                         .unwrap();
                     let lhs_len = match lhs_len_result.try_as_basic_value() {
                         inkwell::values::ValueKind::Basic(value) => value.into_int_value(),
                         _ => {
                             return Err(CodeGenError::UndefinedVariable(
-                                "strlen did not return a value".to_string()
+                                "strlen did not return a value".to_string(),
                             ))
                         }
                     };
-                    let rhs_len_result = self.builder
+                    let rhs_len_result = self
+                        .builder
                         .build_call(strlen_fn, &[rhs_str_ptr.into()], "rhs_len")
                         .unwrap();
                     let rhs_len = match rhs_len_result.try_as_basic_value() {
                         inkwell::values::ValueKind::Basic(value) => value.into_int_value(),
                         _ => {
                             return Err(CodeGenError::UndefinedVariable(
-                                "strlen did not return a value".to_string()
+                                "strlen did not return a value".to_string(),
                             ))
                         }
                     };
 
                     // Calculate total size (lhs_len + rhs_len + 1 for null terminator)
-                    let total_len = self.builder
+                    let total_len = self
+                        .builder
                         .build_int_add(lhs_len, rhs_len, "total_len")
                         .unwrap();
-                    let total_size = self.builder
-                        .build_int_add(total_len, self.context.i64_type().const_int(1, false), "total_size")
+                    let total_size = self
+                        .builder
+                        .build_int_add(
+                            total_len,
+                            self.context.i64_type().const_int(1, false),
+                            "total_size",
+                        )
                         .unwrap();
 
                     // Allocate memory for concatenated string
                     let malloc_fn = self.add_malloc();
-                    let concat_ptr_result = self.builder
+                    let concat_ptr_result = self
+                        .builder
                         .build_call(malloc_fn, &[total_size.into()], "malloc_concat")
                         .unwrap();
                     let concat_ptr = match concat_ptr_result.try_as_basic_value() {
                         inkwell::values::ValueKind::Basic(value) => value.into_pointer_value(),
                         _ => {
                             return Err(CodeGenError::UndefinedVariable(
-                                "malloc did not return a value".to_string()
+                                "malloc did not return a value".to_string(),
                             ))
                         }
                     };
@@ -839,17 +962,17 @@ impl<'ctx> Compiler<'ctx> {
                     // Copy second string (offset by lhs_len)
                     let rhs_dest = unsafe {
                         self.builder
-                            .build_gep(
-                                self.context.i8_type(),
-                                concat_ptr,
-                                &[lhs_len],
-                                "rhs_dest"
-                            )
+                            .build_gep(self.context.i8_type(), concat_ptr, &[lhs_len], "rhs_dest")
                             .unwrap()
                     };
                     // Copy rhs_len + 1 to include null terminator
-                    let rhs_copy_len = self.builder
-                        .build_int_add(rhs_len, self.context.i64_type().const_int(1, false), "rhs_copy_len")
+                    let rhs_copy_len = self
+                        .builder
+                        .build_int_add(
+                            rhs_len,
+                            self.context.i64_type().const_int(1, false),
+                            "rhs_copy_len",
+                        )
                         .unwrap();
                     self.builder
                         .build_call(
@@ -864,7 +987,9 @@ impl<'ctx> Compiler<'ctx> {
 
                     // Create PyObject for concatenated string
                     let concat_result = self.create_pyobject_string(concat_ptr);
-                    self.builder.build_unconditional_branch(merge_block).unwrap();
+                    self.builder
+                        .build_unconditional_branch(merge_block)
+                        .unwrap();
 
                     // Arithmetic block (for non-string addition)
                     self.builder.position_at_end(arithmetic_block);
@@ -872,25 +997,48 @@ impl<'ctx> Compiler<'ctx> {
                     let rhs_payload = self.extract_payload(rhs_obj);
 
                     // Check if either operand is a float (tag == TYPE_TAG_FLOAT)
-                    let float_tag_const = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
-                    let lhs_is_float = self.builder
-                        .build_int_compare(inkwell::IntPredicate::EQ, lhs_tag, float_tag_const, "lhs_is_float")
+                    let float_tag_const = self
+                        .context
+                        .i8_type()
+                        .const_int(TYPE_TAG_FLOAT as u64, false);
+                    let lhs_is_float = self
+                        .builder
+                        .build_int_compare(
+                            inkwell::IntPredicate::EQ,
+                            lhs_tag,
+                            float_tag_const,
+                            "lhs_is_float",
+                        )
                         .unwrap();
-                    let rhs_is_float = self.builder
-                        .build_int_compare(inkwell::IntPredicate::EQ, rhs_tag, float_tag_const, "rhs_is_float")
+                    let rhs_is_float = self
+                        .builder
+                        .build_int_compare(
+                            inkwell::IntPredicate::EQ,
+                            rhs_tag,
+                            float_tag_const,
+                            "rhs_is_float",
+                        )
                         .unwrap();
 
                     // If either is float, result should be float
-                    let result_is_float = self.builder
+                    let result_is_float = self
+                        .builder
                         .build_or(lhs_is_float, rhs_is_float, "result_is_float")
                         .unwrap();
 
-                    let result_payload = self.builder.build_float_add(lhs_payload, rhs_payload, "addtmp").unwrap();
+                    let result_payload = self
+                        .builder
+                        .build_float_add(lhs_payload, rhs_payload, "addtmp")
+                        .unwrap();
 
                     // Select the result tag based on whether either operand is float
                     let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
-                    let float_tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
-                    let result_tag = self.builder
+                    let float_tag = self
+                        .context
+                        .i8_type()
+                        .const_int(TYPE_TAG_FLOAT as u64, false);
+                    let result_tag = self
+                        .builder
                         .build_select(result_is_float, float_tag, int_tag, "result_tag")
                         .unwrap()
                         .into_int_value();
@@ -898,44 +1046,75 @@ impl<'ctx> Compiler<'ctx> {
                     // Create result PyObject
                     let pyobject_type = self.create_pyobject_type();
                     let mut arithmetic_result = pyobject_type.get_undef();
-                    arithmetic_result = self.builder
+                    arithmetic_result = self
+                        .builder
                         .build_insert_value(arithmetic_result, result_tag, 0, "insert_tag")
                         .unwrap()
                         .into_int_value();
-                    arithmetic_result = self.builder
+                    arithmetic_result = self
+                        .builder
                         .build_insert_value(arithmetic_result, result_payload, 1, "insert_payload")
                         .unwrap()
                         .into_int_value();
-                    self.builder.build_unconditional_branch(merge_block).unwrap();
+                    self.builder
+                        .build_unconditional_branch(merge_block)
+                        .unwrap();
 
                     // Merge block - phi node to select result
                     self.builder.position_at_end(merge_block);
                     let phi = self.builder.build_phi(pyobject_type, "add_result").unwrap();
-                    phi.add_incoming(&[(&concat_result, concat_block), (&arithmetic_result, arithmetic_block)]);
+                    phi.add_incoming(&[
+                        (&concat_result, concat_block),
+                        (&arithmetic_result, arithmetic_block),
+                    ]);
                     return Ok(phi.as_basic_value().into_int_value());
                 }
 
                 // Handle bitwise operations separately (they require integer operands)
                 match op {
-                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::LShift | BinOp::RShift => {
+                    BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor
+                    | BinOp::LShift
+                    | BinOp::RShift => {
                         // Convert payloads to integers
                         let lhs_payload = self.extract_payload(lhs_obj);
                         let rhs_payload = self.extract_payload(rhs_obj);
 
-                        let lhs_int = self.builder
-                            .build_float_to_signed_int(lhs_payload, self.context.i64_type(), "lhs_to_int")
+                        let lhs_int = self
+                            .builder
+                            .build_float_to_signed_int(
+                                lhs_payload,
+                                self.context.i64_type(),
+                                "lhs_to_int",
+                            )
                             .unwrap();
-                        let rhs_int = self.builder
-                            .build_float_to_signed_int(rhs_payload, self.context.i64_type(), "rhs_to_int")
+                        let rhs_int = self
+                            .builder
+                            .build_float_to_signed_int(
+                                rhs_payload,
+                                self.context.i64_type(),
+                                "rhs_to_int",
+                            )
                             .unwrap();
 
                         // Perform bitwise operation
                         let result_int = match op {
-                            BinOp::BitAnd => self.builder.build_and(lhs_int, rhs_int, "and").unwrap(),
+                            BinOp::BitAnd => {
+                                self.builder.build_and(lhs_int, rhs_int, "and").unwrap()
+                            }
                             BinOp::BitOr => self.builder.build_or(lhs_int, rhs_int, "or").unwrap(),
-                            BinOp::BitXor => self.builder.build_xor(lhs_int, rhs_int, "xor").unwrap(),
-                            BinOp::LShift => self.builder.build_left_shift(lhs_int, rhs_int, "shl").unwrap(),
-                            BinOp::RShift => self.builder.build_right_shift(lhs_int, rhs_int, true, "shr").unwrap(),
+                            BinOp::BitXor => {
+                                self.builder.build_xor(lhs_int, rhs_int, "xor").unwrap()
+                            }
+                            BinOp::LShift => self
+                                .builder
+                                .build_left_shift(lhs_int, rhs_int, "shl")
+                                .unwrap(),
+                            BinOp::RShift => self
+                                .builder
+                                .build_right_shift(lhs_int, rhs_int, true, "shr")
+                                .unwrap(),
                             _ => unreachable!(),
                         };
 
@@ -951,33 +1130,68 @@ impl<'ctx> Compiler<'ctx> {
                         let rhs_payload = self.extract_payload(rhs_obj);
 
                         // Check if either operand is a float (tag == TYPE_TAG_FLOAT)
-                        let float_tag_const = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
-                        let lhs_is_float = self.builder
-                            .build_int_compare(inkwell::IntPredicate::EQ, lhs_tag, float_tag_const, "lhs_is_float")
+                        let float_tag_const = self
+                            .context
+                            .i8_type()
+                            .const_int(TYPE_TAG_FLOAT as u64, false);
+                        let lhs_is_float = self
+                            .builder
+                            .build_int_compare(
+                                inkwell::IntPredicate::EQ,
+                                lhs_tag,
+                                float_tag_const,
+                                "lhs_is_float",
+                            )
                             .unwrap();
-                        let rhs_is_float = self.builder
-                            .build_int_compare(inkwell::IntPredicate::EQ, rhs_tag, float_tag_const, "rhs_is_float")
+                        let rhs_is_float = self
+                            .builder
+                            .build_int_compare(
+                                inkwell::IntPredicate::EQ,
+                                rhs_tag,
+                                float_tag_const,
+                                "rhs_is_float",
+                            )
                             .unwrap();
 
                         // If either is float, result should be float
-                        let result_is_float = self.builder
+                        let result_is_float = self
+                            .builder
                             .build_or(lhs_is_float, rhs_is_float, "result_is_float")
                             .unwrap();
 
                         // Perform the operation on payloads
                         let result_payload = match op {
-                            BinOp::Add => self.builder.build_float_add(lhs_payload, rhs_payload, "addtmp").unwrap(),
-                            BinOp::Sub => self.builder.build_float_sub(lhs_payload, rhs_payload, "subtmp").unwrap(),
-                            BinOp::Mul => self.builder.build_float_mul(lhs_payload, rhs_payload, "multmp").unwrap(),
-                            BinOp::Div => self.builder.build_float_div(lhs_payload, rhs_payload, "divtmp").unwrap(),
-                            BinOp::Mod => self.builder.build_float_rem(lhs_payload, rhs_payload, "modtmp").unwrap(),
+                            BinOp::Add => self
+                                .builder
+                                .build_float_add(lhs_payload, rhs_payload, "addtmp")
+                                .unwrap(),
+                            BinOp::Sub => self
+                                .builder
+                                .build_float_sub(lhs_payload, rhs_payload, "subtmp")
+                                .unwrap(),
+                            BinOp::Mul => self
+                                .builder
+                                .build_float_mul(lhs_payload, rhs_payload, "multmp")
+                                .unwrap(),
+                            BinOp::Div => self
+                                .builder
+                                .build_float_div(lhs_payload, rhs_payload, "divtmp")
+                                .unwrap(),
+                            BinOp::Mod => self
+                                .builder
+                                .build_float_rem(lhs_payload, rhs_payload, "modtmp")
+                                .unwrap(),
                             _ => unreachable!(),
                         };
 
                         // Select the result tag based on whether either operand is float
                         let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
-                        let float_tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
-                        let result_tag = self.builder
+                        let float_tag = self
+                            .context
+                            .i8_type()
+                            .const_int(TYPE_TAG_FLOAT as u64, false);
+                        let result_tag = self
+                            .builder
                             .build_select(result_is_float, float_tag, int_tag, "result_tag")
                             .unwrap()
                             .into_int_value();
@@ -985,11 +1199,13 @@ impl<'ctx> Compiler<'ctx> {
                         // Create result PyObject
                         let pyobject_type = self.create_pyobject_type();
                         let mut result_obj = pyobject_type.get_undef();
-                        result_obj = self.builder
+                        result_obj = self
+                            .builder
                             .build_insert_value(result_obj, result_tag, 0, "insert_tag")
                             .unwrap()
                             .into_int_value();
-                        result_obj = self.builder
+                        result_obj = self
+                            .builder
                             .build_insert_value(result_obj, result_payload, 1, "insert_payload")
                             .unwrap()
                             .into_int_value();
@@ -1000,13 +1216,16 @@ impl<'ctx> Compiler<'ctx> {
             }
             IRExpr::Call { func, args } => {
                 // Clone the function value to avoid borrow checker issues
-                let function = *self
-                    .functions
-                    .get(func)
-                    .ok_or_else(|| CodeGenError::UndefinedVariable(format!("function '{}'", func)))?;
+                let function = *self.functions.get(func).ok_or_else(|| {
+                    CodeGenError::UndefinedVariable(format!("function '{}'", func))
+                })?;
 
                 // Get defaults for this function
-                let defaults = self.function_defaults.get(func).cloned().unwrap_or_default();
+                let defaults = self
+                    .function_defaults
+                    .get(func)
+                    .cloned()
+                    .unwrap_or_default();
                 let num_provided_args = args.len();
 
                 // Compile provided arguments
@@ -1024,9 +1243,10 @@ impl<'ctx> Compiler<'ctx> {
                             let default_pyobj = self.compile_expression(default_expr)?;
                             compiled_args.push(default_pyobj.into());
                         } else {
-                            return Err(CodeGenError::UndefinedVariable(
-                                format!("Missing required argument {} for function '{}'", i, func)
-                            ));
+                            return Err(CodeGenError::UndefinedVariable(format!(
+                                "Missing required argument {} for function '{}'",
+                                i, func
+                            )));
                         }
                     }
                 }
@@ -1040,11 +1260,9 @@ impl<'ctx> Compiler<'ctx> {
                 use inkwell::values::ValueKind;
                 match call_result.try_as_basic_value() {
                     ValueKind::Basic(value) => Ok(value.into_int_value()),
-                    ValueKind::Instruction(_) => {
-                        Err(CodeGenError::UndefinedVariable(
-                            "Function call did not return a value".to_string()
-                        ))
-                    }
+                    ValueKind::Instruction(_) => Err(CodeGenError::UndefinedVariable(
+                        "Function call did not return a value".to_string(),
+                    )),
                 }
             }
             IRExpr::Input => {
@@ -1052,7 +1270,8 @@ impl<'ctx> Compiler<'ctx> {
                 let format_string = self.get_scanf_float_format_string();
 
                 // Allocate space for the input value
-                let input_alloca = self.builder
+                let input_alloca = self
+                    .builder
                     .build_alloca(self.context.f64_type(), "input_tmp")
                     .unwrap();
 
@@ -1066,7 +1285,8 @@ impl<'ctx> Compiler<'ctx> {
                     .unwrap();
 
                 // Load the value from the alloca
-                let value = self.builder
+                let value = self
+                    .builder
                     .build_load(self.context.f64_type(), input_alloca, "input_value")
                     .unwrap()
                     .into_float_value();
@@ -1079,13 +1299,23 @@ impl<'ctx> Compiler<'ctx> {
                 let arg_tag = self.extract_tag(arg_obj);
 
                 // Check if the argument is a string
-                let string_tag_const = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
-                let is_string = self.builder
-                    .build_int_compare(inkwell::IntPredicate::EQ, arg_tag, string_tag_const, "is_string")
+                let string_tag_const = self
+                    .context
+                    .i8_type()
+                    .const_int(TYPE_TAG_STRING as u64, false);
+                let is_string = self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::EQ,
+                        arg_tag,
+                        string_tag_const,
+                        "is_string",
+                    )
                     .unwrap();
 
                 // Get current function for creating basic blocks
-                let current_fn = self.builder
+                let current_fn = self
+                    .builder
                     .get_insert_block()
                     .unwrap()
                     .get_parent()
@@ -1104,31 +1334,39 @@ impl<'ctx> Compiler<'ctx> {
                 self.builder.position_at_end(string_len_block);
                 let str_ptr = self.extract_string_ptr(arg_obj);
                 let strlen_fn = self.add_strlen();
-                let len_result = self.builder
+                let len_result = self
+                    .builder
                     .build_call(strlen_fn, &[str_ptr.into()], "strlen")
                     .unwrap();
                 let len_int = match len_result.try_as_basic_value() {
                     inkwell::values::ValueKind::Basic(value) => value.into_int_value(),
                     _ => {
                         return Err(CodeGenError::UndefinedVariable(
-                            "strlen did not return a value".to_string()
+                            "strlen did not return a value".to_string(),
                         ))
                     }
                 };
                 let string_len_result = self.create_pyobject_int(len_int);
-                self.builder.build_unconditional_branch(merge_block).unwrap();
+                self.builder
+                    .build_unconditional_branch(merge_block)
+                    .unwrap();
 
                 // Other types - return 0 for now (could be extended for lists, etc.)
                 self.builder.position_at_end(other_len_block);
                 let zero_int = self.context.i64_type().const_int(0, false);
                 let other_len_result = self.create_pyobject_int(zero_int);
-                self.builder.build_unconditional_branch(merge_block).unwrap();
+                self.builder
+                    .build_unconditional_branch(merge_block)
+                    .unwrap();
 
                 // Merge block
                 self.builder.position_at_end(merge_block);
                 let pyobject_type = self.create_pyobject_type();
                 let phi = self.builder.build_phi(pyobject_type, "len_result").unwrap();
-                phi.add_incoming(&[(&string_len_result, string_len_block), (&other_len_result, other_len_block)]);
+                phi.add_incoming(&[
+                    (&string_len_result, string_len_block),
+                    (&other_len_result, other_len_block),
+                ]);
                 Ok(phi.as_basic_value().into_int_value())
             }
             IRExpr::Comparison { op, left, right } => {
@@ -1141,15 +1379,16 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Perform the comparison
                 let predicate = match op {
-                    CmpOp::Eq => FloatPredicate::OEQ,   // Ordered and equal
+                    CmpOp::Eq => FloatPredicate::OEQ,    // Ordered and equal
                     CmpOp::NotEq => FloatPredicate::ONE, // Ordered and not equal
-                    CmpOp::Lt => FloatPredicate::OLT,   // Ordered and less than
-                    CmpOp::Gt => FloatPredicate::OGT,   // Ordered and greater than
-                    CmpOp::LtE => FloatPredicate::OLE,  // Ordered and less than or equal
-                    CmpOp::GtE => FloatPredicate::OGE,  // Ordered and greater than or equal
+                    CmpOp::Lt => FloatPredicate::OLT,    // Ordered and less than
+                    CmpOp::Gt => FloatPredicate::OGT,    // Ordered and greater than
+                    CmpOp::LtE => FloatPredicate::OLE,   // Ordered and less than or equal
+                    CmpOp::GtE => FloatPredicate::OGE,   // Ordered and greater than or equal
                 };
 
-                let cmp_result = self.builder
+                let cmp_result = self
+                    .builder
                     .build_float_compare(predicate, lhs_payload, rhs_payload, "cmptmp")
                     .unwrap();
 
@@ -1163,7 +1402,8 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Call malloc to allocate memory
                 let malloc_fn = self.add_malloc();
-                let malloc_result = self.builder
+                let malloc_result = self
+                    .builder
                     .build_call(malloc_fn, &[size.into()], "malloc_str")
                     .unwrap();
 
@@ -1173,13 +1413,14 @@ impl<'ctx> Compiler<'ctx> {
                     ValueKind::Basic(value) => value.into_pointer_value(),
                     ValueKind::Instruction(_) => {
                         return Err(CodeGenError::UndefinedVariable(
-                            "malloc did not return a value".to_string()
+                            "malloc did not return a value".to_string(),
                         ))
                     }
                 };
 
                 // Create a global string constant for the literal
-                let global_str = self.builder
+                let global_str = self
+                    .builder
                     .build_global_string_ptr(s, "str_literal")
                     .unwrap();
 
@@ -1210,7 +1451,8 @@ impl<'ctx> Compiler<'ctx> {
                     UnaryOp::Invert => {
                         // Bitwise NOT (~x)
                         let payload = self.extract_payload(operand_obj);
-                        let operand_int = self.builder
+                        let operand_int = self
+                            .builder
                             .build_float_to_signed_int(payload, self.context.i64_type(), "to_int")
                             .unwrap();
                         let result = self.builder.build_not(operand_int, "not").unwrap();
@@ -1226,11 +1468,13 @@ impl<'ctx> Compiler<'ctx> {
                         let tag = self.extract_tag(operand_obj);
                         let pyobject_type = self.create_pyobject_type();
                         let mut result_obj = pyobject_type.get_undef();
-                        result_obj = self.builder
+                        result_obj = self
+                            .builder
                             .build_insert_value(result_obj, tag, 0, "insert_tag")
                             .unwrap()
                             .into_int_value();
-                        result_obj = self.builder
+                        result_obj = self
+                            .builder
                             .build_insert_value(result_obj, result, 1, "insert_payload")
                             .unwrap()
                             .into_int_value();
@@ -1247,7 +1491,8 @@ impl<'ctx> Compiler<'ctx> {
                         let zero = self.context.f64_type().const_float(0.0);
 
                         // Check if operand is zero
-                        let is_zero = self.builder
+                        let is_zero = self
+                            .builder
                             .build_float_compare(FloatPredicate::OEQ, payload, zero, "is_zero")
                             .unwrap();
 
@@ -1271,24 +1516,22 @@ impl<'ctx> Compiler<'ctx> {
                 // size = list_len * sizeof(PyObject)
                 let pyobject_size = pyobject_type.size_of().unwrap();
                 let element_count = self.context.i64_type().const_int(list_len as u64, false);
-                let total_size = self.builder
-                    .build_int_mul(
-                        pyobject_size,
-                        element_count,
-                        "list_size"
-                    )
+                let total_size = self
+                    .builder
+                    .build_int_mul(pyobject_size, element_count, "list_size")
                     .unwrap();
 
                 // Allocate the list
                 let malloc_fn = self.add_malloc();
-                let list_ptr_result = self.builder
+                let list_ptr_result = self
+                    .builder
                     .build_call(malloc_fn, &[total_size.into()], "malloc_list")
                     .unwrap();
                 let list_ptr = match list_ptr_result.try_as_basic_value() {
                     inkwell::values::ValueKind::Basic(value) => value.into_pointer_value(),
                     _ => {
                         return Err(CodeGenError::UndefinedVariable(
-                            "malloc did not return a value".to_string()
+                            "malloc did not return a value".to_string(),
                         ))
                     }
                 };
@@ -1302,7 +1545,7 @@ impl<'ctx> Compiler<'ctx> {
                                 pyobject_type,
                                 list_ptr,
                                 &[index],
-                                &format!("elem_ptr_{}", i)
+                                &format!("elem_ptr_{}", i),
                             )
                             .unwrap()
                     };
@@ -1321,7 +1564,8 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Extract the index value
                 let index_payload = self.extract_payload(index_obj);
-                let index_int = self.builder
+                let index_int = self
+                    .builder
                     .build_float_to_signed_int(index_payload, self.context.i64_type(), "index_int")
                     .unwrap();
 
@@ -1329,17 +1573,13 @@ impl<'ctx> Compiler<'ctx> {
                 let pyobject_type = self.create_pyobject_type();
                 let elem_ptr = unsafe {
                     self.builder
-                        .build_in_bounds_gep(
-                            pyobject_type,
-                            list_ptr,
-                            &[index_int],
-                            "elem_ptr"
-                        )
+                        .build_in_bounds_gep(pyobject_type, list_ptr, &[index_int], "elem_ptr")
                         .unwrap()
                 };
 
                 // Load and return the element
-                let elem = self.builder
+                let elem = self
+                    .builder
                     .build_load(pyobject_type, elem_ptr, "elem")
                     .unwrap()
                     .into_int_value();
@@ -1365,7 +1605,8 @@ impl<'ctx> Compiler<'ctx> {
 
         // Store function and defaults in the maps
         self.functions.insert(name.to_string(), function);
-        self.function_defaults.insert(name.to_string(), defaults.to_vec());
+        self.function_defaults
+            .insert(name.to_string(), defaults.to_vec());
 
         // Create entry block
         let entry = self.context.append_basic_block(function, "entry");
@@ -1417,9 +1658,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Allocate space for PyObject struct
         let pyobject_type = self.create_pyobject_type();
-        builder
-            .build_alloca(pyobject_type, name)
-            .unwrap()
+        builder.build_alloca(pyobject_type, name).unwrap()
     }
 
     fn add_printf(&self) -> FunctionValue<'ctx> {
@@ -1462,7 +1701,10 @@ impl<'ctx> Compiler<'ctx> {
         let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
         let size_type = self.context.i64_type();
         // void* memcpy(void* dest, const void* src, size_t n)
-        let memcpy_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into(), size_type.into()], false);
+        let memcpy_type = i8_ptr_type.fn_type(
+            &[i8_ptr_type.into(), i8_ptr_type.into(), size_type.into()],
+            false,
+        );
         self.module
             .add_function("memcpy", memcpy_type, Some(Linkage::External))
     }
@@ -1561,17 +1803,23 @@ impl<'ctx> Compiler<'ctx> {
 
         // Check the tag to determine print type
         let int_tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
-        let string_tag = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
+        let string_tag = self
+            .context
+            .i8_type()
+            .const_int(TYPE_TAG_STRING as u64, false);
 
-        let is_int = self.builder
+        let is_int = self
+            .builder
             .build_int_compare(inkwell::IntPredicate::EQ, tag, int_tag, "is_int")
             .unwrap();
-        let is_string = self.builder
+        let is_string = self
+            .builder
             .build_int_compare(inkwell::IntPredicate::EQ, tag, string_tag, "is_string")
             .unwrap();
 
         // Get current function for creating basic blocks
-        let current_fn = self.builder
+        let current_fn = self
+            .builder
             .get_insert_block()
             .unwrap()
             .get_parent()
@@ -1597,7 +1845,8 @@ impl<'ctx> Compiler<'ctx> {
 
         // Print int
         self.builder.position_at_end(int_block);
-        let int_val = self.builder
+        let int_val = self
+            .builder
             .build_float_to_signed_int(payload, self.context.i64_type(), "to_int")
             .unwrap();
         let int_format = if with_newline {
@@ -1606,11 +1855,7 @@ impl<'ctx> Compiler<'ctx> {
             self.get_int_format_string_no_newline()
         };
         self.builder
-            .build_call(
-                printf,
-                &[int_format.into(), int_val.into()],
-                "printf_int",
-            )
+            .build_call(printf, &[int_format.into(), int_val.into()], "printf_int")
             .unwrap();
         self.builder.build_unconditional_branch(end_block).unwrap();
 

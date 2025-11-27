@@ -40,7 +40,6 @@
 /// - Integers limited to ±140,737,488,355,328 (48-bit)
 /// - Pointers limited to 48-bit (acceptable on x86-64)
 /// - Slightly more complex implementation than struct approach
-
 use std::mem;
 
 // Bit patterns for NaN boxing
@@ -205,7 +204,11 @@ impl TaggedPointer {
         } else if self.is_int() {
             self.as_int() as f64
         } else if self.is_bool() {
-            if self.as_bool() { 1.0 } else { 0.0 }
+            if self.as_bool() {
+                1.0
+            } else {
+                0.0
+            }
         } else {
             // For pointers (string/list), convert to f64
             // This is for backward compatibility with existing codegen
@@ -217,14 +220,14 @@ impl TaggedPointer {
     #[inline]
     pub fn type_tag(&self) -> u8 {
         if self.is_float() {
-            1  // TYPE_TAG_FLOAT
+            1 // TYPE_TAG_FLOAT
         } else {
             match self.get_tag() {
-                TAG_INT => 0,      // TYPE_TAG_INT
-                TAG_BOOL => 2,     // TYPE_TAG_BOOL
-                TAG_STRING => 3,   // TYPE_TAG_STRING
-                TAG_LIST => 4,     // TYPE_TAG_LIST
-                _ => 0,            // Fallback
+                TAG_INT => 0,    // TYPE_TAG_INT
+                TAG_BOOL => 2,   // TYPE_TAG_BOOL
+                TAG_STRING => 3, // TYPE_TAG_STRING
+                TAG_LIST => 4,   // TYPE_TAG_LIST
+                _ => 0,          // Fallback
             }
         }
     }
@@ -290,7 +293,9 @@ mod tests {
         let bool_obj = TaggedPointer::from_bool(true);
         let str_obj = TaggedPointer::from_string_ptr(0x1000);
 
-        assert!(int_obj.is_int() && !int_obj.is_float() && !int_obj.is_bool() && !int_obj.is_string());
+        assert!(
+            int_obj.is_int() && !int_obj.is_float() && !int_obj.is_bool() && !int_obj.is_string()
+        );
         assert!(float_obj.is_float() && !float_obj.is_int() && !float_obj.is_bool());
         assert!(bool_obj.is_bool() && !bool_obj.is_int() && !bool_obj.is_float());
         assert!(str_obj.is_string() && !str_obj.is_int() && !str_obj.is_float());

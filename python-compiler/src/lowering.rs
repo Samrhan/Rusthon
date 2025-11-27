@@ -91,10 +91,7 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
             Ok(IRStmt::Return(expr))
         }
         ast::Stmt::If(ast::StmtIf {
-            test,
-            body,
-            orelse,
-            ..
+            test, body, orelse, ..
         }) => {
             let condition = lower_expression(test)?;
             let then_body: Result<Vec<IRStmt>, LoweringError> =
@@ -124,7 +121,9 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 body: body?,
             })
         }
-        ast::Stmt::AugAssign(ast::StmtAugAssign { target, op, value, .. }) => {
+        ast::Stmt::AugAssign(ast::StmtAugAssign {
+            target, op, value, ..
+        }) => {
             // Desugar augmented assignment: x += y => x = x + y
             if let ast::Expr::Name(ast::ExprName { id, .. }) = target.as_ref() {
                 let current_value = IRExpr::Variable(id.to_string());
@@ -145,16 +144,21 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
         }
         ast::Stmt::Break(_) => Ok(IRStmt::Break),
         ast::Stmt::Continue(_) => Ok(IRStmt::Continue),
-        ast::Stmt::For(ast::StmtFor { target, iter, body, .. }) => {
+        ast::Stmt::For(ast::StmtFor {
+            target, iter, body, ..
+        }) => {
             // Only support for i in range(...) pattern
             if let ast::Expr::Call(ast::ExprCall { func, args, .. }) = iter.as_ref() {
                 if let ast::Expr::Name(ast::ExprName { id, .. }) = func.as_ref() {
                     if id == "range" && !args.is_empty() {
                         // Extract the loop variable
-                        let var = if let ast::Expr::Name(ast::ExprName { id, .. }) = target.as_ref() {
+                        let var = if let ast::Expr::Name(ast::ExprName { id, .. }) = target.as_ref()
+                        {
                             id.to_string()
                         } else {
-                            return Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())));
+                            return Err(LoweringError::UnsupportedStatement(Box::new(
+                                stmt.clone(),
+                            )));
                         };
 
                         // Handle range(end) or range(start, end)
@@ -166,7 +170,9 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                             (lower_expression(&args[0])?, lower_expression(&args[1])?)
                         } else {
                             // range with step is not supported
-                            return Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())));
+                            return Err(LoweringError::UnsupportedStatement(Box::new(
+                                stmt.clone(),
+                            )));
                         };
 
                         // Lower the loop body
@@ -200,10 +206,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
         },
         ast::Expr::Name(ast::ExprName { id, .. }) => Ok(IRExpr::Variable(id.to_string())),
         ast::Expr::BinOp(ast::ExprBinOp {
-            left,
-            op,
-            right,
-            ..
+            left, op, right, ..
         }) => {
             let left = lower_expression(left)?;
             let right = lower_expression(right)?;
@@ -368,7 +371,12 @@ else:
         assert_eq!(ir.len(), 1);
 
         // Check that it's an If statement with an else body containing another If
-        if let IRStmt::If { condition: _, then_body, else_body } = &ir[0] {
+        if let IRStmt::If {
+            condition: _,
+            then_body,
+            else_body,
+        } = &ir[0]
+        {
             assert_eq!(then_body.len(), 1);
             assert_eq!(else_body.len(), 1);
             // The else body should contain the elif as a nested If
@@ -422,7 +430,13 @@ while True:
         let ir = lower_program(&stmts).unwrap();
 
         assert_eq!(ir.len(), 1);
-        if let IRStmt::For { var, start, end, body } = &ir[0] {
+        if let IRStmt::For {
+            var,
+            start,
+            end,
+            body,
+        } = &ir[0]
+        {
             assert_eq!(var, "i");
             assert_eq!(start, &IRExpr::Constant(0));
             assert_eq!(end, &IRExpr::Constant(5));
@@ -439,7 +453,13 @@ while True:
         let ir = lower_program(&stmts).unwrap();
 
         assert_eq!(ir.len(), 1);
-        if let IRStmt::For { var, start, end, body } = &ir[0] {
+        if let IRStmt::For {
+            var,
+            start,
+            end,
+            body,
+        } = &ir[0]
+        {
             assert_eq!(var, "j");
             assert_eq!(start, &IRExpr::Constant(2));
             assert_eq!(end, &IRExpr::Constant(8));
