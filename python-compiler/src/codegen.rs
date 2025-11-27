@@ -3,14 +3,25 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::passes::{PassManager, PassManagerBuilder};
-use inkwell::values::{FunctionValue, FloatValue, IntValue, PointerValue, StructValue};
+use inkwell::values::{FunctionValue, FloatValue, IntValue, PointerValue, IntValue as PyObjectValue};
 use inkwell::FloatPredicate;
-use inkwell::types::StructType;
 use inkwell::OptimizationLevel;
 use std::collections::HashMap;
 use thiserror::Error;
 
-// Type tags for PyObject discrimination
+// NaN-boxing constants for tagged pointers
+// PyObject is now represented as a single i64 using NaN-boxing
+const QNAN: u64 = 0x7FF8_0000_0000_0000;
+const TAG_MASK: u64 = 0x0007_0000_0000_0000;
+const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
+
+// Type tags for NaN-boxing (stored in bits 48-50)
+const TAG_INT: u64 = 0;
+const TAG_BOOL: u64 = 1;
+const TAG_STRING: u64 = 2;
+const TAG_LIST: u64 = 3;
+
+// Legacy type tags (for compatibility with print dispatch logic)
 const TYPE_TAG_INT: u8 = 0;
 const TYPE_TAG_FLOAT: u8 = 1;
 const TYPE_TAG_BOOL: u8 = 2;
@@ -54,231 +65,327 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Creates the PyObject struct type: {i8 tag, f64 payload}
-    fn create_pyobject_type(&self) -> StructType<'ctx> {
-        let i8_type = self.context.i8_type();
-        let f64_type = self.context.f64_type();
-        self.context.struct_type(&[i8_type.into(), f64_type.into()], false)
+    /// Returns the PyObject type: i64 (NaN-boxed value)
+    /// PyObjects are now single 64-bit values using NaN-boxing for 50% memory reduction
+    fn create_pyobject_type(&self) -> inkwell::types::IntType<'ctx> {
+        self.context.i64_type()
     }
 
-    /// Creates a PyObject value from an integer
-    fn create_pyobject_int(&self, value: IntValue<'ctx>) -> StructValue<'ctx> {
-        let pyobject_type = self.create_pyobject_type();
-        let tag = self.context.i8_type().const_int(TYPE_TAG_INT as u64, false);
-
-        // Convert i64 to f64 for storage in the payload
-        let value_f64 = self.builder
-            .build_signed_int_to_float(value, self.context.f64_type(), "int_to_f64")
+    /// Creates a PyObject value from an integer using NaN-boxing
+    fn create_pyobject_int(&self, value: IntValue<'ctx>) -> IntValue<'ctx> {
+        // NaN-box: QNAN | (TAG_INT << 48) | (value & PAYLOAD_MASK)
+        // Truncate to 48 bits (sign-extended)
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload = self.builder
+            .build_and(value, payload_mask, "int_payload")
             .unwrap();
 
-        // Create the struct
-        let mut pyobject = pyobject_type.get_undef();
-        pyobject = self.builder
-            .build_insert_value(pyobject, tag, 0, "insert_tag")
-            .unwrap()
-            .into_struct_value();
-        pyobject = self.builder
-            .build_insert_value(pyobject, value_f64, 1, "insert_payload")
-            .unwrap()
-            .into_struct_value();
+        // Create tag bits: TAG_INT << 48
+        let tag_shifted = self.context.i64_type().const_int(TAG_INT << 48, false);
 
-        pyobject
-    }
-
-    /// Creates a PyObject value from a float
-    fn create_pyobject_float(&self, value: FloatValue<'ctx>) -> StructValue<'ctx> {
-        let pyobject_type = self.create_pyobject_type();
-        let tag = self.context.i8_type().const_int(TYPE_TAG_FLOAT as u64, false);
-
-        // Create the struct
-        let mut pyobject = pyobject_type.get_undef();
-        pyobject = self.builder
-            .build_insert_value(pyobject, tag, 0, "insert_tag")
-            .unwrap()
-            .into_struct_value();
-        pyobject = self.builder
-            .build_insert_value(pyobject, value, 1, "insert_payload")
-            .unwrap()
-            .into_struct_value();
-
-        pyobject
-    }
-
-    /// Creates a PyObject value from a boolean (stored as 0.0 or 1.0)
-    fn create_pyobject_bool(&self, value: IntValue<'ctx>) -> StructValue<'ctx> {
-        let pyobject_type = self.create_pyobject_type();
-        let tag = self.context.i8_type().const_int(TYPE_TAG_BOOL as u64, false);
-
-        // Convert i1 to f64 (0.0 or 1.0)
-        let value_f64 = self.builder
-            .build_unsigned_int_to_float(value, self.context.f64_type(), "bool_to_f64")
+        // Combine: QNAN | tag | payload
+        let qnan_const = self.context.i64_type().const_int(QNAN, false);
+        let with_tag = self.builder
+            .build_or(qnan_const, tag_shifted, "with_tag")
+            .unwrap();
+        let pyobject = self.builder
+            .build_or(with_tag, payload, "pyobject_int")
             .unwrap();
 
-        // Create the struct
-        let mut pyobject = pyobject_type.get_undef();
-        pyobject = self.builder
-            .build_insert_value(pyobject, tag, 0, "insert_tag")
+        pyobject
+    }
+
+    /// Creates a PyObject value from a float using NaN-boxing
+    /// Floats are stored as-is in their canonical IEEE 754 representation
+    fn create_pyobject_float(&self, value: FloatValue<'ctx>) -> IntValue<'ctx> {
+        // For floats, we store them directly (not NaN-boxed)
+        // Just bitcast f64 to i64
+        self.builder
+            .build_bitcast(value, self.context.i64_type(), "float_as_i64")
             .unwrap()
-            .into_struct_value();
-        pyobject = self.builder
-            .build_insert_value(pyobject, value_f64, 1, "insert_payload")
-            .unwrap()
-            .into_struct_value();
+            .into_int_value()
+    }
+
+    /// Creates a PyObject value from a boolean using NaN-boxing
+    fn create_pyobject_bool(&self, value: IntValue<'ctx>) -> IntValue<'ctx> {
+        // NaN-box: QNAN | (TAG_BOOL << 48) | (0 or 1)
+        // Zero-extend i1 to i64
+        let payload = self.builder
+            .build_int_z_extend(value, self.context.i64_type(), "bool_payload")
+            .unwrap();
+
+        // Create tag bits: TAG_BOOL << 48
+        let tag_shifted = self.context.i64_type().const_int(TAG_BOOL << 48, false);
+
+        // Combine: QNAN | tag | payload
+        let qnan_const = self.context.i64_type().const_int(QNAN, false);
+        let with_tag = self.builder
+            .build_or(qnan_const, tag_shifted, "with_tag")
+            .unwrap();
+        let pyobject = self.builder
+            .build_or(with_tag, payload, "pyobject_bool")
+            .unwrap();
 
         pyobject
     }
 
-    /// Creates a PyObject value from a string pointer
-    /// The pointer is stored in the payload as a pointer-sized integer cast to f64
-    fn create_pyobject_string(&self, ptr: PointerValue<'ctx>) -> StructValue<'ctx> {
-        let pyobject_type = self.create_pyobject_type();
-        let tag = self.context.i8_type().const_int(TYPE_TAG_STRING as u64, false);
-
-        // Convert pointer to integer, then to f64 for storage
-        // Note: This is a bit of a hack - we're storing a pointer as a float
-        // A better approach would use a union type, but this works for now
+    /// Creates a PyObject value from a string pointer using NaN-boxing
+    fn create_pyobject_string(&self, ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
+        // NaN-box: QNAN | (TAG_STRING << 48) | (ptr & PAYLOAD_MASK)
+        // Convert pointer to i64
         let ptr_as_int = self.builder
             .build_ptr_to_int(ptr, self.context.i64_type(), "ptr_to_int")
             .unwrap();
-        let ptr_as_f64 = self.builder
-            .build_unsigned_int_to_float(ptr_as_int, self.context.f64_type(), "ptr_to_f64")
+
+        // Mask to 48 bits
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload = self.builder
+            .build_and(ptr_as_int, payload_mask, "ptr_payload")
             .unwrap();
 
-        // Create the struct
-        let mut pyobject = pyobject_type.get_undef();
-        pyobject = self.builder
-            .build_insert_value(pyobject, tag, 0, "insert_tag")
-            .unwrap()
-            .into_struct_value();
-        pyobject = self.builder
-            .build_insert_value(pyobject, ptr_as_f64, 1, "insert_payload")
-            .unwrap()
-            .into_struct_value();
+        // Create tag bits: TAG_STRING << 48
+        let tag_shifted = self.context.i64_type().const_int(TAG_STRING << 48, false);
+
+        // Combine: QNAN | tag | payload
+        let qnan_const = self.context.i64_type().const_int(QNAN, false);
+        let with_tag = self.builder
+            .build_or(qnan_const, tag_shifted, "with_tag")
+            .unwrap();
+        let pyobject = self.builder
+            .build_or(with_tag, payload, "pyobject_string")
+            .unwrap();
 
         pyobject
     }
 
     /// Extracts a string pointer from a PyObject
     /// Assumes the PyObject has a STRING tag
-    fn extract_string_ptr(&self, pyobject: StructValue<'ctx>) -> PointerValue<'ctx> {
-        let payload = self.extract_payload(pyobject);
-
-        // Convert f64 back to integer, then to pointer
-        let ptr_as_int = self.builder
-            .build_float_to_unsigned_int(payload, self.context.i64_type(), "f64_to_int")
+    fn extract_string_ptr(&self, pyobject: IntValue<'ctx>) -> PointerValue<'ctx> {
+        // Extract payload (lower 48 bits)
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload = self.builder
+            .build_and(pyobject, payload_mask, "extract_ptr_payload")
             .unwrap();
+
+        // Convert to pointer
         self.builder
             .build_int_to_ptr(
-                ptr_as_int,
+                payload,
                 self.context.ptr_type(inkwell::AddressSpace::default()),
-                "int_to_ptr"
+                "payload_to_ptr"
             )
             .unwrap()
     }
 
-    /// Creates a PyObject value from a list pointer and length
-    /// The pointer is stored in the payload as a pointer-sized integer cast to f64
-    /// The length is encoded in the upper 32 bits of the pointer
-    fn create_pyobject_list(&self, ptr: PointerValue<'ctx>, len: usize) -> StructValue<'ctx> {
-        let pyobject_type = self.create_pyobject_type();
-        let tag = self.context.i8_type().const_int(TYPE_TAG_LIST as u64, false);
-
-        // Encode both pointer and length in the payload
-        // We'll use a simple encoding: store the pointer as an int, then encode length separately
-        // For simplicity, we'll just store the pointer and track length elsewhere if needed
-        // For now, we'll store the length in a separate allocation and store that pointer
-
-        // Allocate space for length (i64)
-        let len_alloca = self.builder
-            .build_alloca(self.context.i64_type(), "list_len_tmp")
-            .unwrap();
-        let len_val = self.context.i64_type().const_int(len as u64, false);
-        self.builder.build_store(len_alloca, len_val).unwrap();
-
-        // Create a struct to hold both pointer and length
-        // We'll pack them into a single i64: lower 48 bits for pointer, upper 16 bits for length
-        // This limits lists to 65535 elements and pointers to 48 bits (common on x86-64)
+    /// Creates a PyObject value from a list pointer and length using NaN-boxing
+    /// Note: We store just the pointer in the NaN-boxed value
+    /// The length must be tracked separately (e.g., stored before the array data)
+    fn create_pyobject_list(&self, ptr: PointerValue<'ctx>, _len: usize) -> IntValue<'ctx> {
+        // For now, just store the pointer (length tracking is a TODO)
+        // NaN-box: QNAN | (TAG_LIST << 48) | (ptr & PAYLOAD_MASK)
         let ptr_as_int = self.builder
             .build_ptr_to_int(ptr, self.context.i64_type(), "ptr_to_int")
             .unwrap();
 
-        let len_i64 = self.context.i64_type().const_int(len as u64, false);
-        let len_shifted = self.builder
-            .build_left_shift(len_i64, self.context.i64_type().const_int(48, false), "len_shift")
+        // Mask to 48 bits
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload = self.builder
+            .build_and(ptr_as_int, payload_mask, "list_ptr_payload")
             .unwrap();
 
-        let packed = self.builder
-            .build_or(ptr_as_int, len_shifted, "packed")
-            .unwrap();
+        // Create tag bits: TAG_LIST << 48
+        let tag_shifted = self.context.i64_type().const_int(TAG_LIST << 48, false);
 
-        let packed_as_f64 = self.builder
-            .build_unsigned_int_to_float(packed, self.context.f64_type(), "packed_to_f64")
+        // Combine: QNAN | tag | payload
+        let qnan_const = self.context.i64_type().const_int(QNAN, false);
+        let with_tag = self.builder
+            .build_or(qnan_const, tag_shifted, "with_tag")
             .unwrap();
-
-        // Create the struct
-        let mut pyobject = pyobject_type.get_undef();
-        pyobject = self.builder
-            .build_insert_value(pyobject, tag, 0, "insert_tag")
-            .unwrap()
-            .into_struct_value();
-        pyobject = self.builder
-            .build_insert_value(pyobject, packed_as_f64, 1, "insert_payload")
-            .unwrap()
-            .into_struct_value();
+        let pyobject = self.builder
+            .build_or(with_tag, payload, "pyobject_list")
+            .unwrap();
 
         pyobject
     }
 
     /// Extracts a list pointer and length from a PyObject
     /// Assumes the PyObject has a LIST tag
-    fn extract_list_ptr_and_len(&self, pyobject: StructValue<'ctx>) -> (PointerValue<'ctx>, IntValue<'ctx>) {
-        let payload = self.extract_payload(pyobject);
-
-        // Convert f64 back to integer
-        let packed = self.builder
-            .build_float_to_unsigned_int(payload, self.context.i64_type(), "f64_to_int")
+    /// Note: Length extraction is simplified - actual length should be stored with the array
+    fn extract_list_ptr_and_len(&self, pyobject: IntValue<'ctx>) -> (PointerValue<'ctx>, IntValue<'ctx>) {
+        // Extract payload (lower 48 bits)
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload = self.builder
+            .build_and(pyobject, payload_mask, "extract_list_payload")
             .unwrap();
 
-        // Extract pointer (lower 48 bits)
-        let ptr_mask = self.context.i64_type().const_int((1u64 << 48) - 1, false);
-        let ptr_as_int = self.builder
-            .build_and(packed, ptr_mask, "extract_ptr")
-            .unwrap();
+        // Convert to pointer
         let ptr = self.builder
             .build_int_to_ptr(
-                ptr_as_int,
+                payload,
                 self.context.ptr_type(inkwell::AddressSpace::default()),
-                "int_to_ptr"
+                "payload_to_list_ptr"
             )
             .unwrap();
 
-        // Extract length (upper 16 bits)
-        let len_shifted = self.builder
-            .build_right_shift(packed, self.context.i64_type().const_int(48, false), false, "len_unshift")
-            .unwrap();
+        // For length, we return 0 for now (TODO: store length with array data)
+        let len = self.context.i64_type().const_int(0, false);
 
-        (ptr, len_shifted)
+        (ptr, len)
     }
 
-    /// Extracts the tag from a PyObject
-    fn extract_tag(&self, pyobject: StructValue<'ctx>) -> IntValue<'ctx> {
+    /// Checks if a PyObject is a float (not NaN-boxed)
+    fn is_float(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
+        // A value is a float if (value & QNAN) != QNAN
+        let qnan_const = self.context.i64_type().const_int(QNAN, false);
+        let masked = self.builder
+            .build_and(pyobject, qnan_const, "check_qnan")
+            .unwrap();
+        let is_not_qnan = self.builder
+            .build_int_compare(
+                inkwell::IntPredicate::NE,
+                masked,
+                qnan_const,
+                "is_float"
+            )
+            .unwrap();
+        is_not_qnan
+    }
+
+    /// Extracts the tag from a NaN-boxed PyObject
+    /// Returns tag as i8 for compatibility (0=INT, 1=FLOAT, 2=BOOL, 3=STRING, 4=LIST)
+    fn extract_tag(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
+        // Check if it's a float first
+        let is_float_val = self.is_float(pyobject);
+
+        // If not NaN-boxed (i.e., it's a float), return TYPE_TAG_FLOAT (1)
+        // Otherwise extract tag from bits 48-50
+        let tag_mask = self.context.i64_type().const_int(TAG_MASK, false);
+        let tag_bits = self.builder
+            .build_and(pyobject, tag_mask, "tag_bits")
+            .unwrap();
+        let tag_shifted = self.builder
+            .build_right_shift(tag_bits, self.context.i64_type().const_int(48, false), false, "tag")
+            .unwrap();
+
+        // Convert internal tag to external tag
+        // TAG_INT (0) -> TYPE_TAG_INT (0)
+        // TAG_BOOL (1) -> TYPE_TAG_BOOL (2)
+        // TAG_STRING (2) -> TYPE_TAG_STRING (3)
+        // TAG_LIST (3) -> TYPE_TAG_LIST (4)
+        let tag_map_bool = self.context.i64_type().const_int(TYPE_TAG_BOOL as u64, false);
+        let tag_map_string = self.context.i64_type().const_int(TYPE_TAG_STRING as u64, false);
+        let tag_map_list = self.context.i64_type().const_int(TYPE_TAG_LIST as u64, false);
+
+        // Select based on tag value
+        let is_bool = self.builder
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                tag_shifted,
+                self.context.i64_type().const_int(TAG_BOOL, false),
+                "is_bool"
+            )
+            .unwrap();
+        let is_string = self.builder
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                tag_shifted,
+                self.context.i64_type().const_int(TAG_STRING, false),
+                "is_string"
+            )
+            .unwrap();
+        let is_list = self.builder
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                tag_shifted,
+                self.context.i64_type().const_int(TAG_LIST, false),
+                "is_list"
+            )
+            .unwrap();
+
+        // Build the mapped tag
+        let mapped_tag = self.builder
+            .build_select(is_bool, tag_map_bool, tag_shifted, "map_bool")
+            .unwrap()
+            .into_int_value();
+        let mapped_tag = self.builder
+            .build_select(is_string, tag_map_string, mapped_tag, "map_string")
+            .unwrap()
+            .into_int_value();
+        let mapped_tag = self.builder
+            .build_select(is_list, tag_map_list, mapped_tag, "map_list")
+            .unwrap()
+            .into_int_value();
+
+        // If it's a float, return TYPE_TAG_FLOAT, otherwise return mapped tag
+        let float_tag = self.context.i64_type().const_int(TYPE_TAG_FLOAT as u64, false);
         self.builder
-            .build_extract_value(pyobject, 0, "extract_tag")
+            .build_select(is_float_val, float_tag, mapped_tag, "final_tag")
             .unwrap()
             .into_int_value()
     }
 
-    /// Extracts the payload (f64) from a PyObject
-    fn extract_payload(&self, pyobject: StructValue<'ctx>) -> FloatValue<'ctx> {
+    /// Extracts the payload as f64 from a PyObject
+    /// For floats: bitcast i64 to f64
+    /// For integers/bools: extract and convert to f64
+    /// For pointers: extract as integer and convert to f64
+    fn extract_payload(&self, pyobject: IntValue<'ctx>) -> FloatValue<'ctx> {
+        let is_float_val = self.is_float(pyobject);
+
+        // If it's a float, bitcast i64 to f64
+        let as_float = self.builder
+            .build_bitcast(pyobject, self.context.f64_type(), "i64_to_f64")
+            .unwrap()
+            .into_float_value();
+
+        // Otherwise, extract lower 48 bits and convert to f64
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload_int = self.builder
+            .build_and(pyobject, payload_mask, "extract_payload")
+            .unwrap();
+
+        // Sign-extend from 48 bits to 64 bits for integers
+        let sign_bit = self.builder
+            .build_right_shift(
+                payload_int,
+                self.context.i64_type().const_int(47, false),
+                false,
+                "sign_bit"
+            )
+            .unwrap();
+        let is_negative = self.builder
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                sign_bit,
+                self.context.i64_type().const_int(1, false),
+                "is_negative"
+            )
+            .unwrap();
+
+        // If negative, fill upper bits with 1s
+        let sign_extension = self.context.i64_type().const_int(!PAYLOAD_MASK, false);
+        let extended = self.builder
+            .build_or(payload_int, sign_extension, "sign_extend")
+            .unwrap();
+        let signed_payload = self.builder
+            .build_select(is_negative, extended, payload_int, "signed_payload")
+            .unwrap()
+            .into_int_value();
+
+        // Convert to f64
+        let payload_as_float = self.builder
+            .build_signed_int_to_float(signed_payload, self.context.f64_type(), "payload_to_f64")
+            .unwrap();
+
+        // Select based on whether it's a float
         self.builder
-            .build_extract_value(pyobject, 1, "extract_payload")
+            .build_select(is_float_val, as_float, payload_as_float, "final_payload")
             .unwrap()
             .into_float_value()
     }
 
     /// Converts a PyObject to a boolean (i1) for conditionals
     /// Returns true if the value is non-zero
-    fn pyobject_to_bool(&self, pyobject: StructValue<'ctx>) -> IntValue<'ctx> {
+    fn pyobject_to_bool(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
         let payload = self.extract_payload(pyobject);
         let zero = self.context.f64_type().const_float(0.0);
         self.builder
@@ -527,7 +634,7 @@ impl<'ctx> Compiler<'ctx> {
                 let var_val = self.builder
                     .build_load(pyobject_type, ptr, var)
                     .unwrap()
-                    .into_struct_value();
+                    .into_int_value();
 
                 // Compare var < end
                 let var_payload = self.extract_payload(var_val);
@@ -557,7 +664,7 @@ impl<'ctx> Compiler<'ctx> {
                 let var_val = self.builder
                     .build_load(pyobject_type, ptr, var)
                     .unwrap()
-                    .into_struct_value();
+                    .into_int_value();
                 let var_payload = self.extract_payload(var_val);
                 let one = self.context.f64_type().const_float(1.0);
                 let new_payload = self.builder
@@ -570,11 +677,11 @@ impl<'ctx> Compiler<'ctx> {
                 new_val = self.builder
                     .build_insert_value(new_val, tag, 0, "insert_tag")
                     .unwrap()
-                    .into_struct_value();
+                    .into_int_value();
                 new_val = self.builder
                     .build_insert_value(new_val, new_payload, 1, "insert_payload")
                     .unwrap()
-                    .into_struct_value();
+                    .into_int_value();
 
                 self.builder.build_store(ptr, new_val).unwrap();
                 self.builder.build_unconditional_branch(loop_cond_bb).unwrap();
@@ -603,7 +710,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn compile_expression(&mut self, expr: &IRExpr) -> Result<StructValue<'ctx>, CodeGenError> {
+    fn compile_expression(&mut self, expr: &IRExpr) -> Result<IntValue<'ctx>, CodeGenError> {
         match expr {
             IRExpr::Constant(n) => {
                 let int_val = self.context.i64_type().const_int(*n as u64, true);
@@ -622,13 +729,13 @@ impl<'ctx> Compiler<'ctx> {
                     .get(name)
                     .ok_or_else(|| CodeGenError::UndefinedVariable(name.clone()))?;
 
-                // Variables are stored as PyObject structs
+                // Variables are stored as PyObject (i64)
                 let pyobject_type = self.create_pyobject_type();
                 let loaded = self.builder
                     .build_load(pyobject_type, *ptr, name)
                     .unwrap();
 
-                Ok(loaded.into_struct_value())
+                Ok(loaded.into_int_value())
             }
             IRExpr::BinaryOp { op, left, right } => {
                 let lhs_obj = self.compile_expression(left)?;
@@ -794,18 +901,18 @@ impl<'ctx> Compiler<'ctx> {
                     arithmetic_result = self.builder
                         .build_insert_value(arithmetic_result, result_tag, 0, "insert_tag")
                         .unwrap()
-                        .into_struct_value();
+                        .into_int_value();
                     arithmetic_result = self.builder
                         .build_insert_value(arithmetic_result, result_payload, 1, "insert_payload")
                         .unwrap()
-                        .into_struct_value();
+                        .into_int_value();
                     self.builder.build_unconditional_branch(merge_block).unwrap();
 
                     // Merge block - phi node to select result
                     self.builder.position_at_end(merge_block);
                     let phi = self.builder.build_phi(pyobject_type, "add_result").unwrap();
                     phi.add_incoming(&[(&concat_result, concat_block), (&arithmetic_result, arithmetic_block)]);
-                    return Ok(phi.as_basic_value().into_struct_value());
+                    return Ok(phi.as_basic_value().into_int_value());
                 }
 
                 // Handle bitwise operations separately (they require integer operands)
@@ -881,11 +988,11 @@ impl<'ctx> Compiler<'ctx> {
                         result_obj = self.builder
                             .build_insert_value(result_obj, result_tag, 0, "insert_tag")
                             .unwrap()
-                            .into_struct_value();
+                            .into_int_value();
                         result_obj = self.builder
                             .build_insert_value(result_obj, result_payload, 1, "insert_payload")
                             .unwrap()
-                            .into_struct_value();
+                            .into_int_value();
 
                         Ok(result_obj)
                     }
@@ -932,7 +1039,7 @@ impl<'ctx> Compiler<'ctx> {
                 // Extract the return value from the call (should be a PyObject)
                 use inkwell::values::ValueKind;
                 match call_result.try_as_basic_value() {
-                    ValueKind::Basic(value) => Ok(value.into_struct_value()),
+                    ValueKind::Basic(value) => Ok(value.into_int_value()),
                     ValueKind::Instruction(_) => {
                         Err(CodeGenError::UndefinedVariable(
                             "Function call did not return a value".to_string()
@@ -1022,7 +1129,7 @@ impl<'ctx> Compiler<'ctx> {
                 let pyobject_type = self.create_pyobject_type();
                 let phi = self.builder.build_phi(pyobject_type, "len_result").unwrap();
                 phi.add_incoming(&[(&string_len_result, string_len_block), (&other_len_result, other_len_block)]);
-                Ok(phi.as_basic_value().into_struct_value())
+                Ok(phi.as_basic_value().into_int_value())
             }
             IRExpr::Comparison { op, left, right } => {
                 let lhs_obj = self.compile_expression(left)?;
@@ -1122,11 +1229,11 @@ impl<'ctx> Compiler<'ctx> {
                         result_obj = self.builder
                             .build_insert_value(result_obj, tag, 0, "insert_tag")
                             .unwrap()
-                            .into_struct_value();
+                            .into_int_value();
                         result_obj = self.builder
                             .build_insert_value(result_obj, result, 1, "insert_payload")
                             .unwrap()
-                            .into_struct_value();
+                            .into_int_value();
 
                         Ok(result_obj)
                     }
@@ -1235,7 +1342,7 @@ impl<'ctx> Compiler<'ctx> {
                 let elem = self.builder
                     .build_load(pyobject_type, elem_ptr, "elem")
                     .unwrap()
-                    .into_struct_value();
+                    .into_int_value();
 
                 Ok(elem)
             }
@@ -1445,7 +1552,7 @@ impl<'ctx> Compiler<'ctx> {
             .as_pointer_value()
     }
 
-    fn build_print_value(&mut self, pyobject: StructValue<'ctx>, with_newline: bool) {
+    fn build_print_value(&mut self, pyobject: IntValue<'ctx>, with_newline: bool) {
         let printf = self.add_printf();
 
         // Extract tag and payload
