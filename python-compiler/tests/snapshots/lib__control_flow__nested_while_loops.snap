@@ -1,0 +1,322 @@
+---
+source: tests/control_flow.rs
+expression: compile_source(source)
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+@string_format_string = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
+@int_format_string.1 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string.2 = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+@string_format_string.3 = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
+
+define i32 @main() {
+entry:
+  %j = alloca i64, align 8
+  %i = alloca i64, align 8
+  store i64 9221120237041090560, ptr %i, align 4
+  br label %loop_cond
+
+loop_cond:                                        ; preds = %add_merge132, %entry
+  %i1 = load i64, ptr %i, align 4
+  %check_qnan = and i64 %i1, 9221120237041090560
+  %is_float = icmp ne i64 %check_qnan, 9221120237041090560
+  %i64_to_f64 = bitcast i64 %i1 to double
+  %extract_payload = and i64 %i1, 281474976710655
+  %sign_bit = lshr i64 %extract_payload, 47
+  %is_negative = icmp eq i64 %sign_bit, 1
+  %sign_extend = or i64 %extract_payload, -281474976710656
+  %signed_payload = select i1 %is_negative, i64 %sign_extend, i64 %extract_payload
+  %payload_to_f64 = sitofp i64 %signed_payload to double
+  %final_payload = select i1 %is_float, double %i64_to_f64, double %payload_to_f64
+  %cmptmp = fcmp olt double %final_payload, 3.000000e+00
+  %bool_payload = zext i1 %cmptmp to i64
+  %pyobject_bool = or i64 9221401712017801216, %bool_payload
+  %check_qnan2 = and i64 %pyobject_bool, 9221120237041090560
+  %is_float3 = icmp ne i64 %check_qnan2, 9221120237041090560
+  %i64_to_f644 = bitcast i64 %pyobject_bool to double
+  %extract_payload5 = and i64 %pyobject_bool, 281474976710655
+  %sign_bit6 = lshr i64 %extract_payload5, 47
+  %is_negative7 = icmp eq i64 %sign_bit6, 1
+  %sign_extend8 = or i64 %extract_payload5, -281474976710656
+  %signed_payload9 = select i1 %is_negative7, i64 %sign_extend8, i64 %extract_payload5
+  %payload_to_f6410 = sitofp i64 %signed_payload9 to double
+  %final_payload11 = select i1 %is_float3, double %i64_to_f644, double %payload_to_f6410
+  %to_bool = fcmp one double %final_payload11, 0.000000e+00
+  br i1 %to_bool, label %loop_body, label %loop_exit
+
+loop_body:                                        ; preds = %loop_cond
+  store i64 9221120237041090560, ptr %j, align 4
+  br label %loop_cond12
+
+loop_exit:                                        ; preds = %loop_cond
+  ret i32 0
+
+loop_cond12:                                      ; preds = %add_merge, %loop_body
+  %j15 = load i64, ptr %j, align 4
+  %check_qnan16 = and i64 %j15, 9221120237041090560
+  %is_float17 = icmp ne i64 %check_qnan16, 9221120237041090560
+  %i64_to_f6418 = bitcast i64 %j15 to double
+  %extract_payload19 = and i64 %j15, 281474976710655
+  %sign_bit20 = lshr i64 %extract_payload19, 47
+  %is_negative21 = icmp eq i64 %sign_bit20, 1
+  %sign_extend22 = or i64 %extract_payload19, -281474976710656
+  %signed_payload23 = select i1 %is_negative21, i64 %sign_extend22, i64 %extract_payload19
+  %payload_to_f6424 = sitofp i64 %signed_payload23 to double
+  %final_payload25 = select i1 %is_float17, double %i64_to_f6418, double %payload_to_f6424
+  %cmptmp26 = fcmp olt double %final_payload25, 2.000000e+00
+  %bool_payload27 = zext i1 %cmptmp26 to i64
+  %pyobject_bool28 = or i64 9221401712017801216, %bool_payload27
+  %check_qnan29 = and i64 %pyobject_bool28, 9221120237041090560
+  %is_float30 = icmp ne i64 %check_qnan29, 9221120237041090560
+  %i64_to_f6431 = bitcast i64 %pyobject_bool28 to double
+  %extract_payload32 = and i64 %pyobject_bool28, 281474976710655
+  %sign_bit33 = lshr i64 %extract_payload32, 47
+  %is_negative34 = icmp eq i64 %sign_bit33, 1
+  %sign_extend35 = or i64 %extract_payload32, -281474976710656
+  %signed_payload36 = select i1 %is_negative34, i64 %sign_extend35, i64 %extract_payload32
+  %payload_to_f6437 = sitofp i64 %signed_payload36 to double
+  %final_payload38 = select i1 %is_float30, double %i64_to_f6431, double %payload_to_f6437
+  %to_bool39 = fcmp one double %final_payload38, 0.000000e+00
+  br i1 %to_bool39, label %loop_body13, label %loop_exit14
+
+loop_body13:                                      ; preds = %loop_cond12
+  %i40 = load i64, ptr %i, align 4
+  %check_qnan41 = and i64 %i40, 9221120237041090560
+  %is_float42 = icmp ne i64 %check_qnan41, 9221120237041090560
+  %tag_bits = and i64 %i40, 1970324836974592
+  %tag = lshr i64 %tag_bits, 48
+  %is_bool = icmp eq i64 %tag, 1
+  %is_string = icmp eq i64 %tag, 2
+  %is_list = icmp eq i64 %tag, 3
+  %map_bool = select i1 %is_bool, i64 2, i64 %tag
+  %map_string = select i1 %is_string, i64 3, i64 %map_bool
+  %map_list = select i1 %is_list, i64 4, i64 %map_string
+  %final_tag = select i1 %is_float42, i64 1, i64 %map_list
+  %check_qnan43 = and i64 %i40, 9221120237041090560
+  %is_float44 = icmp ne i64 %check_qnan43, 9221120237041090560
+  %i64_to_f6445 = bitcast i64 %i40 to double
+  %extract_payload46 = and i64 %i40, 281474976710655
+  %sign_bit47 = lshr i64 %extract_payload46, 47
+  %is_negative48 = icmp eq i64 %sign_bit47, 1
+  %sign_extend49 = or i64 %extract_payload46, -281474976710656
+  %signed_payload50 = select i1 %is_negative48, i64 %sign_extend49, i64 %extract_payload46
+  %payload_to_f6451 = sitofp i64 %signed_payload50 to double
+  %final_payload52 = select i1 %is_float44, double %i64_to_f6445, double %payload_to_f6451
+  %is_int = icmp eq i64 %final_tag, 0
+  %is_string53 = icmp eq i64 %final_tag, 3
+  br i1 %is_string53, label %print_string, label %check_int
+
+loop_exit14:                                      ; preds = %loop_cond12
+  %i116 = load i64, ptr %i, align 4
+  %check_qnan117 = and i64 %i116, 9221120237041090560
+  %is_float118 = icmp ne i64 %check_qnan117, 9221120237041090560
+  %tag_bits119 = and i64 %i116, 1970324836974592
+  %tag120 = lshr i64 %tag_bits119, 48
+  %is_bool121 = icmp eq i64 %tag120, 1
+  %is_string122 = icmp eq i64 %tag120, 2
+  %is_list123 = icmp eq i64 %tag120, 3
+  %map_bool124 = select i1 %is_bool121, i64 2, i64 %tag120
+  %map_string125 = select i1 %is_string122, i64 3, i64 %map_bool124
+  %map_list126 = select i1 %is_list123, i64 4, i64 %map_string125
+  %final_tag127 = select i1 %is_float118, i64 1, i64 %map_list126
+  %lhs_is_string128 = icmp eq i64 %final_tag127, 3
+  %both_strings129 = and i1 %lhs_is_string128, false
+  br i1 %both_strings129, label %str_concat130, label %arithmetic131
+
+check_int:                                        ; preds = %loop_body13
+  br i1 %is_int, label %print_int, label %print_float
+
+print_int:                                        ; preds = %check_int
+  %to_int = fptosi double %final_payload52 to i64
+  %printf_int = call i32 (ptr, ...) @printf(ptr @int_format_string, i64 %to_int)
+  br label %print_end
+
+print_float:                                      ; preds = %check_int
+  %printf_float = call i32 (ptr, ...) @printf(ptr @float_format_string, double %final_payload52)
+  br label %print_end
+
+print_string:                                     ; preds = %loop_body13
+  %extract_ptr_payload = and i64 %i40, 281474976710655
+  %payload_to_ptr = inttoptr i64 %extract_ptr_payload to ptr
+  %printf_string = call i32 (ptr, ...) @printf(ptr @string_format_string, ptr %payload_to_ptr)
+  br label %print_end
+
+print_end:                                        ; preds = %print_string, %print_float, %print_int
+  %j54 = load i64, ptr %j, align 4
+  %check_qnan55 = and i64 %j54, 9221120237041090560
+  %is_float56 = icmp ne i64 %check_qnan55, 9221120237041090560
+  %tag_bits57 = and i64 %j54, 1970324836974592
+  %tag58 = lshr i64 %tag_bits57, 48
+  %is_bool59 = icmp eq i64 %tag58, 1
+  %is_string60 = icmp eq i64 %tag58, 2
+  %is_list61 = icmp eq i64 %tag58, 3
+  %map_bool62 = select i1 %is_bool59, i64 2, i64 %tag58
+  %map_string63 = select i1 %is_string60, i64 3, i64 %map_bool62
+  %map_list64 = select i1 %is_list61, i64 4, i64 %map_string63
+  %final_tag65 = select i1 %is_float56, i64 1, i64 %map_list64
+  %check_qnan66 = and i64 %j54, 9221120237041090560
+  %is_float67 = icmp ne i64 %check_qnan66, 9221120237041090560
+  %i64_to_f6468 = bitcast i64 %j54 to double
+  %extract_payload69 = and i64 %j54, 281474976710655
+  %sign_bit70 = lshr i64 %extract_payload69, 47
+  %is_negative71 = icmp eq i64 %sign_bit70, 1
+  %sign_extend72 = or i64 %extract_payload69, -281474976710656
+  %signed_payload73 = select i1 %is_negative71, i64 %sign_extend72, i64 %extract_payload69
+  %payload_to_f6474 = sitofp i64 %signed_payload73 to double
+  %final_payload75 = select i1 %is_float67, double %i64_to_f6468, double %payload_to_f6474
+  %is_int76 = icmp eq i64 %final_tag65, 0
+  %is_string77 = icmp eq i64 %final_tag65, 3
+  br i1 %is_string77, label %print_string81, label %check_int78
+
+check_int78:                                      ; preds = %print_end
+  br i1 %is_int76, label %print_int79, label %print_float80
+
+print_int79:                                      ; preds = %check_int78
+  %to_int83 = fptosi double %final_payload75 to i64
+  %printf_int84 = call i32 (ptr, ...) @printf(ptr @int_format_string.1, i64 %to_int83)
+  br label %print_end82
+
+print_float80:                                    ; preds = %check_int78
+  %printf_float85 = call i32 (ptr, ...) @printf(ptr @float_format_string.2, double %final_payload75)
+  br label %print_end82
+
+print_string81:                                   ; preds = %print_end
+  %extract_ptr_payload86 = and i64 %j54, 281474976710655
+  %payload_to_ptr87 = inttoptr i64 %extract_ptr_payload86 to ptr
+  %printf_string88 = call i32 (ptr, ...) @printf(ptr @string_format_string.3, ptr %payload_to_ptr87)
+  br label %print_end82
+
+print_end82:                                      ; preds = %print_string81, %print_float80, %print_int79
+  %j89 = load i64, ptr %j, align 4
+  %check_qnan90 = and i64 %j89, 9221120237041090560
+  %is_float91 = icmp ne i64 %check_qnan90, 9221120237041090560
+  %tag_bits92 = and i64 %j89, 1970324836974592
+  %tag93 = lshr i64 %tag_bits92, 48
+  %is_bool94 = icmp eq i64 %tag93, 1
+  %is_string95 = icmp eq i64 %tag93, 2
+  %is_list96 = icmp eq i64 %tag93, 3
+  %map_bool97 = select i1 %is_bool94, i64 2, i64 %tag93
+  %map_string98 = select i1 %is_string95, i64 3, i64 %map_bool97
+  %map_list99 = select i1 %is_list96, i64 4, i64 %map_string98
+  %final_tag100 = select i1 %is_float91, i64 1, i64 %map_list99
+  %lhs_is_string = icmp eq i64 %final_tag100, 3
+  %both_strings = and i1 %lhs_is_string, false
+  br i1 %both_strings, label %str_concat, label %arithmetic
+
+str_concat:                                       ; preds = %print_end82
+  %extract_ptr_payload101 = and i64 %j89, 281474976710655
+  %payload_to_ptr102 = inttoptr i64 %extract_ptr_payload101 to ptr
+  %lhs_len = call i64 @strlen(ptr %payload_to_ptr102)
+  %rhs_len = call i64 @strlen(ptr inttoptr (i64 1 to ptr))
+  %total_len = add i64 %lhs_len, %rhs_len
+  %total_size = add i64 %total_len, 1
+  %malloc_concat = call ptr @malloc(i64 %total_size)
+  %memcpy_lhs = call ptr @memcpy(ptr %malloc_concat, ptr %payload_to_ptr102, i64 %lhs_len)
+  %rhs_dest = getelementptr i8, ptr %malloc_concat, i64 %lhs_len
+  %rhs_copy_len = add i64 %rhs_len, 1
+  %memcpy_rhs = call ptr @memcpy(ptr %rhs_dest, ptr inttoptr (i64 1 to ptr), i64 %rhs_copy_len)
+  %ptr_to_int = ptrtoint ptr %malloc_concat to i64
+  %ptr_payload = and i64 %ptr_to_int, 281474976710655
+  %pyobject_string = or i64 9221683186994511872, %ptr_payload
+  br label %add_merge
+
+arithmetic:                                       ; preds = %print_end82
+  %check_qnan103 = and i64 %j89, 9221120237041090560
+  %is_float104 = icmp ne i64 %check_qnan103, 9221120237041090560
+  %i64_to_f64105 = bitcast i64 %j89 to double
+  %extract_payload106 = and i64 %j89, 281474976710655
+  %sign_bit107 = lshr i64 %extract_payload106, 47
+  %is_negative108 = icmp eq i64 %sign_bit107, 1
+  %sign_extend109 = or i64 %extract_payload106, -281474976710656
+  %signed_payload110 = select i1 %is_negative108, i64 %sign_extend109, i64 %extract_payload106
+  %payload_to_f64111 = sitofp i64 %signed_payload110 to double
+  %final_payload112 = select i1 %is_float104, double %i64_to_f64105, double %payload_to_f64111
+  %lhs_is_float = icmp eq i64 %final_tag100, 1
+  %result_is_float = or i1 %lhs_is_float, false
+  %addtmp = fadd double %final_payload112, 1.000000e+00
+  %result_tag = select i1 %result_is_float, i64 1, i64 0
+  %is_float_tag = icmp eq i64 %result_tag, 1
+  %float_to_i64 = bitcast double %addtmp to i64
+  %is_bool113 = icmp eq i64 %result_tag, 2
+  %is_string114 = icmp eq i64 %result_tag, 3
+  %is_list115 = icmp eq i64 %result_tag, 4
+  %tag_temp1 = select i1 %is_bool113, i64 1, i64 0
+  %tag_temp2 = select i1 %is_string114, i64 2, i64 %tag_temp1
+  %internal_tag = select i1 %is_list115, i64 3, i64 %tag_temp2
+  %payload_to_i64 = fptosi double %addtmp to i64
+  %payload_masked = and i64 %payload_to_i64, 281474976710655
+  %tag_shifted = shl i64 %internal_tag, 48
+  %with_qnan = or i64 9221120237041090560, %tag_shifted
+  %nanboxed = or i64 %with_qnan, %payload_masked
+  %pyobject = select i1 %is_float_tag, i64 %float_to_i64, i64 %nanboxed
+  br label %add_merge
+
+add_merge:                                        ; preds = %arithmetic, %str_concat
+  %add_result = phi i64 [ %pyobject_string, %str_concat ], [ %pyobject, %arithmetic ]
+  store i64 %add_result, ptr %j, align 4
+  br label %loop_cond12
+
+str_concat130:                                    ; preds = %loop_exit14
+  %extract_ptr_payload133 = and i64 %i116, 281474976710655
+  %payload_to_ptr134 = inttoptr i64 %extract_ptr_payload133 to ptr
+  %lhs_len135 = call i64 @strlen(ptr %payload_to_ptr134)
+  %rhs_len136 = call i64 @strlen(ptr inttoptr (i64 1 to ptr))
+  %total_len137 = add i64 %lhs_len135, %rhs_len136
+  %total_size138 = add i64 %total_len137, 1
+  %malloc_concat139 = call ptr @malloc(i64 %total_size138)
+  %memcpy_lhs140 = call ptr @memcpy(ptr %malloc_concat139, ptr %payload_to_ptr134, i64 %lhs_len135)
+  %rhs_dest141 = getelementptr i8, ptr %malloc_concat139, i64 %lhs_len135
+  %rhs_copy_len142 = add i64 %rhs_len136, 1
+  %memcpy_rhs143 = call ptr @memcpy(ptr %rhs_dest141, ptr inttoptr (i64 1 to ptr), i64 %rhs_copy_len142)
+  %ptr_to_int144 = ptrtoint ptr %malloc_concat139 to i64
+  %ptr_payload145 = and i64 %ptr_to_int144, 281474976710655
+  %pyobject_string146 = or i64 9221683186994511872, %ptr_payload145
+  br label %add_merge132
+
+arithmetic131:                                    ; preds = %loop_exit14
+  %check_qnan147 = and i64 %i116, 9221120237041090560
+  %is_float148 = icmp ne i64 %check_qnan147, 9221120237041090560
+  %i64_to_f64149 = bitcast i64 %i116 to double
+  %extract_payload150 = and i64 %i116, 281474976710655
+  %sign_bit151 = lshr i64 %extract_payload150, 47
+  %is_negative152 = icmp eq i64 %sign_bit151, 1
+  %sign_extend153 = or i64 %extract_payload150, -281474976710656
+  %signed_payload154 = select i1 %is_negative152, i64 %sign_extend153, i64 %extract_payload150
+  %payload_to_f64155 = sitofp i64 %signed_payload154 to double
+  %final_payload156 = select i1 %is_float148, double %i64_to_f64149, double %payload_to_f64155
+  %lhs_is_float157 = icmp eq i64 %final_tag127, 1
+  %result_is_float158 = or i1 %lhs_is_float157, false
+  %addtmp159 = fadd double %final_payload156, 1.000000e+00
+  %result_tag160 = select i1 %result_is_float158, i64 1, i64 0
+  %is_float_tag161 = icmp eq i64 %result_tag160, 1
+  %float_to_i64162 = bitcast double %addtmp159 to i64
+  %is_bool163 = icmp eq i64 %result_tag160, 2
+  %is_string164 = icmp eq i64 %result_tag160, 3
+  %is_list165 = icmp eq i64 %result_tag160, 4
+  %tag_temp1166 = select i1 %is_bool163, i64 1, i64 0
+  %tag_temp2167 = select i1 %is_string164, i64 2, i64 %tag_temp1166
+  %internal_tag168 = select i1 %is_list165, i64 3, i64 %tag_temp2167
+  %payload_to_i64169 = fptosi double %addtmp159 to i64
+  %payload_masked170 = and i64 %payload_to_i64169, 281474976710655
+  %tag_shifted171 = shl i64 %internal_tag168, 48
+  %with_qnan172 = or i64 9221120237041090560, %tag_shifted171
+  %nanboxed173 = or i64 %with_qnan172, %payload_masked170
+  %pyobject174 = select i1 %is_float_tag161, i64 %float_to_i64162, i64 %nanboxed173
+  br label %add_merge132
+
+add_merge132:                                     ; preds = %arithmetic131, %str_concat130
+  %add_result175 = phi i64 [ %pyobject_string146, %str_concat130 ], [ %pyobject174, %arithmetic131 ]
+  store i64 %add_result175, ptr %i, align 4
+  br label %loop_cond
+}
+
+declare i32 @printf(ptr, ...)
+
+declare i64 @strlen(ptr)
+
+declare ptr @malloc(i64)
+
+declare ptr @memcpy(ptr, ptr, i64)

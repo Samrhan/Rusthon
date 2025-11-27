@@ -45,9 +45,18 @@ print(complex_expr)
     let llvm_ir = compiler.compile_program(&ir).unwrap();
 
     // Verify LLVM IR contains expected functions and operations
-    assert!(llvm_ir.contains("define double @add"), "Should have add function");
-    assert!(llvm_ir.contains("define double @multiply"), "Should have multiply function");
-    assert!(llvm_ir.contains("define i32 @main"), "Should have main function");
+    assert!(
+        llvm_ir.contains("define double @add"),
+        "Should have add function"
+    );
+    assert!(
+        llvm_ir.contains("define double @multiply"),
+        "Should have multiply function"
+    );
+    assert!(
+        llvm_ir.contains("define i32 @main"),
+        "Should have main function"
+    );
     assert!(llvm_ir.contains("fadd"), "Should have float addition");
     assert!(llvm_ir.contains("fmul"), "Should have float multiplication");
     assert!(llvm_ir.contains("fsub"), "Should have float subtraction");
@@ -73,7 +82,10 @@ print(result)
     let compiler = codegen::Compiler::new(&context);
     let llvm_ir = compiler.compile_program(&ir).unwrap();
 
-    assert!(llvm_ir.contains("define double @compute"), "Should have compute function");
+    assert!(
+        llvm_ir.contains("define double @compute"),
+        "Should have compute function"
+    );
     insta::assert_snapshot!(llvm_ir);
 }
 
@@ -96,7 +108,10 @@ print(c)
     let llvm_ir = compiler.compile_program(&ir).unwrap();
 
     assert!(llvm_ir.contains("@scanf"), "Should have scanf call");
-    assert!(llvm_ir.contains("define double @double"), "Should have double function");
+    assert!(
+        llvm_ir.contains("define double @double"),
+        "Should have double function"
+    );
     assert!(llvm_ir.contains("@printf"), "Should have printf call");
     insta::assert_snapshot!(llvm_ir);
 }
@@ -123,8 +138,17 @@ print(result)
     let compiler = codegen::Compiler::new(&context);
     let llvm_ir = compiler.compile_program(&ir).unwrap();
 
-    assert!(llvm_ir.contains("define double @f1"), "Should have f1 function");
-    assert!(llvm_ir.contains("define double @f2"), "Should have f2 function");
-    assert!(llvm_ir.contains("define double @f3"), "Should have f3 function");
+    assert!(
+        llvm_ir.contains("define double @f1"),
+        "Should have f1 function"
+    );
+    assert!(
+        llvm_ir.contains("define double @f2"),
+        "Should have f2 function"
+    );
+    assert!(
+        llvm_ir.contains("define double @f3"),
+        "Should have f3 function"
+    );
     insta::assert_snapshot!(llvm_ir);
 }

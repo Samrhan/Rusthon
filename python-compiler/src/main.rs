@@ -6,13 +6,13 @@ use std::process::{self, Command};
 
 mod ast;
 mod codegen;
+mod error;
 mod lowering;
 mod parser;
-mod error;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     if args.len() != 2 {
         eprintln!("Usage: {} <python_file.py>", args[0]);
         eprintln!("Example: {} example.py", args[0]);
@@ -20,7 +20,7 @@ fn main() {
     }
 
     let filename = &args[1];
-    
+
     let source = match fs::read_to_string(filename) {
         Ok(content) => content,
         Err(e) => {

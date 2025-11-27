@@ -16,7 +16,10 @@ fn test_undefined_variable_error() {
     assert!(result.is_err(), "Should fail with undefined variable");
     match result {
         Err(codegen::CodeGenError::UndefinedVariable(var)) => {
-            assert!(var.contains("undefined_var"), "Error should mention the undefined variable");
+            assert!(
+                var.contains("undefined_var"),
+                "Error should mention the undefined variable"
+            );
         }
         _ => panic!("Expected UndefinedVariable error"),
     }
@@ -65,5 +68,8 @@ fn test_print_multiple_args_error() {
     assert!(ast.is_ok(), "Parsing should succeed");
 
     let ir = lowering::lower_program(&ast.unwrap());
-    assert!(ir.is_err(), "Should fail with wrong number of print arguments");
+    assert!(
+        ir.is_err(),
+        "Should fail with wrong number of print arguments"
+    );
 }

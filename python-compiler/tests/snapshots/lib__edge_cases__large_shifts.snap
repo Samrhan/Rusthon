@@ -1,0 +1,56 @@
+---
+source: tests/edge_cases.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+@string_format_string = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
+@int_format_string.1 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string.2 = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+@string_format_string.3 = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
+
+define i32 @main() {
+entry:
+  br i1 poison, label %print_string, label %check_int
+
+check_int:                                        ; preds = %entry
+  br i1 poison, label %print_int, label %print_float
+
+print_int:                                        ; preds = %check_int
+  %printf_int = call i32 (ptr, ...) @printf(ptr @int_format_string, i64 poison)
+  br label %print_end
+
+print_float:                                      ; preds = %check_int
+  %printf_float = call i32 (ptr, ...) @printf(ptr @float_format_string, double poison)
+  br label %print_end
+
+print_string:                                     ; preds = %entry
+  %printf_string = call i32 (ptr, ...) @printf(ptr @string_format_string, ptr poison)
+  br label %print_end
+
+print_end:                                        ; preds = %print_string, %print_float, %print_int
+  br i1 poison, label %print_string4, label %check_int1
+
+check_int1:                                       ; preds = %print_end
+  br i1 poison, label %print_int2, label %print_float3
+
+print_int2:                                       ; preds = %check_int1
+  %printf_int6 = call i32 (ptr, ...) @printf(ptr @int_format_string.1, i64 poison)
+  br label %print_end5
+
+print_float3:                                     ; preds = %check_int1
+  %printf_float7 = call i32 (ptr, ...) @printf(ptr @float_format_string.2, double poison)
+  br label %print_end5
+
+print_string4:                                    ; preds = %print_end
+  %printf_string8 = call i32 (ptr, ...) @printf(ptr @string_format_string.3, ptr poison)
+  br label %print_end5
+
+print_end5:                                       ; preds = %print_string4, %print_float3, %print_int2
+  ret i32 0
+}
+
+declare i32 @printf(ptr, ...)

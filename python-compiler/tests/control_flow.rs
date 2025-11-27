@@ -1,5 +1,5 @@
-use python_compiler::{codegen::Compiler, lowering::lower_program, parser::parse_program};
 use inkwell::context::Context;
+use python_compiler::{codegen::Compiler, lowering::lower_program, parser::parse_program};
 
 fn compile_source(source: &str) -> String {
     let ast = parse_program(source).unwrap();

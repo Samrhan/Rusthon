@@ -1,0 +1,35 @@
+---
+source: tests/unary.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+@string_format_string = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
+
+define i32 @main() {
+entry:
+  br i1 false, label %print_string, label %check_int
+
+check_int:                                        ; preds = %entry
+  br i1 true, label %print_int, label %print_float
+
+print_int:                                        ; preds = %check_int
+  %printf_int = call i32 (ptr, ...) @printf(ptr @int_format_string, i64 -6)
+  br label %print_end
+
+print_float:                                      ; preds = %check_int
+  %printf_float = call i32 (ptr, ...) @printf(ptr @float_format_string, double -6.000000e+00)
+  br label %print_end
+
+print_string:                                     ; preds = %entry
+  %printf_string = call i32 (ptr, ...) @printf(ptr @string_format_string, ptr inttoptr (i64 281474976710650 to ptr))
+  br label %print_end
+
+print_end:                                        ; preds = %print_string, %print_float, %print_int
+  ret i32 0
+}
+
+declare i32 @printf(ptr, ...)

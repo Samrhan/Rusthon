@@ -16,12 +16,17 @@ print(greet("World", "Hi"))
     // Check that function has defaults
     assert_eq!(ir.len(), 3);
     match &ir[0] {
-        ast::IRStmt::FunctionDef { name, params, defaults, body: _ } => {
+        ast::IRStmt::FunctionDef {
+            name,
+            params,
+            defaults,
+            body: _,
+        } => {
             assert_eq!(name, "greet");
             assert_eq!(params.len(), 2);
             assert_eq!(defaults.len(), 2);
-            assert!(defaults[0].is_none());  // name has no default
-            assert!(defaults[1].is_some());  // greeting has default
+            assert!(defaults[0].is_none()); // name has no default
+            assert!(defaults[1].is_some()); // greeting has default
 
             // Check default value is "Hello"
             if let Some(ast::IRExpr::StringLiteral(s)) = &defaults[1] {
@@ -54,13 +59,18 @@ print(add(5, 15, 25))
 
     // Check that function has defaults
     match &ir[0] {
-        ast::IRStmt::FunctionDef { name, params, defaults, body: _ } => {
+        ast::IRStmt::FunctionDef {
+            name,
+            params,
+            defaults,
+            body: _,
+        } => {
             assert_eq!(name, "add");
             assert_eq!(params.len(), 3);
             assert_eq!(defaults.len(), 3);
-            assert!(defaults[0].is_none());  // a has no default
-            assert!(defaults[1].is_some());  // b has default 10
-            assert!(defaults[2].is_some());  // c has default 20
+            assert!(defaults[0].is_none()); // a has no default
+            assert!(defaults[1].is_some()); // b has default 10
+            assert!(defaults[2].is_some()); // c has default 20
 
             // Check default values
             if let Some(ast::IRExpr::Constant(n)) = &defaults[1] {
