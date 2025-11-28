@@ -75,14 +75,8 @@ add_merge:                                        ; preds = %arithmetic, %str_co
   ret i64 %add_result
 }
 
-; Function Attrs: mustprogress nofree nounwind willreturn memory(argmem: read)
-declare i64 @strlen(ptr nocapture) local_unnamed_addr #1
-
-; Function Attrs: mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite)
-declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #2
-
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind willreturn memory(none)
-define i64 @multiply(i64 %0, i64 %1) local_unnamed_addr #3 {
+define i64 @multiply(i64 %0, i64 %1) local_unnamed_addr #1 {
 entry:
   %check_qnan = and i64 %0, 9221120237041090560
   %is_float.not.not = icmp eq i64 %check_qnan, 9221120237041090560
@@ -146,6 +140,12 @@ entry:
   ret i64 %calltmp4
 }
 
+; Function Attrs: mustprogress nofree nounwind willreturn memory(argmem: read)
+declare i64 @strlen(ptr nocapture) local_unnamed_addr #2
+
+; Function Attrs: mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite)
+declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #3
+
 ; Function Attrs: nofree nounwind
 define noundef i32 @main() local_unnamed_addr #4 {
 print_end:
@@ -160,8 +160,8 @@ declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_a
 declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg) #5
 
 attributes #0 = { mustprogress nofree nounwind willreturn }
-attributes #1 = { mustprogress nofree nounwind willreturn memory(argmem: read) }
-attributes #2 = { mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite) "alloc-family"="malloc" }
-attributes #3 = { mustprogress nofree norecurse nosync nounwind willreturn memory(none) }
+attributes #1 = { mustprogress nofree norecurse nosync nounwind willreturn memory(none) }
+attributes #2 = { mustprogress nofree nounwind willreturn memory(argmem: read) }
+attributes #3 = { mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite) "alloc-family"="malloc" }
 attributes #4 = { nofree nounwind }
 attributes #5 = { nocallback nofree nounwind willreturn memory(argmem: readwrite) }

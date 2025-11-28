@@ -43,8 +43,8 @@ fn test_undefined_function_error() {
 
 #[test]
 fn test_unsupported_expression() {
-    // Test with a feature that's not supported (e.g., list literals)
-    let source = "x = [1, 2, 3]";
+    // Test with a feature that's not supported (e.g., dictionary literals)
+    let source = "x = {'key': 'value'}";
     let ast = parser::parse_program(source);
     assert!(ast.is_ok(), "Parsing should succeed");
 
@@ -61,15 +61,17 @@ fn test_parse_error() {
 }
 
 #[test]
-fn test_print_multiple_args_error() {
-    // Test with print() having multiple arguments (not supported)
+fn test_print_multiple_args_supported() {
+    // Test that print() with multiple arguments is now supported
     let source = "print(1, 2, 3)";
     let ast = parser::parse_program(source);
     assert!(ast.is_ok(), "Parsing should succeed");
 
     let ir = lowering::lower_program(&ast.unwrap());
-    assert!(
-        ir.is_err(),
-        "Should fail with wrong number of print arguments"
-    );
+    assert!(ir.is_ok(), "Multiple print arguments should be supported");
+
+    let context = inkwell::context::Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    let result = compiler.compile_program(&ir.unwrap());
+    assert!(result.is_ok(), "Should compile successfully");
 }

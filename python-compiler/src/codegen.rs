@@ -621,16 +621,28 @@ impl<'ctx> Compiler<'ctx> {
             .iter()
             .partition(|stmt| matches!(stmt, IRStmt::FunctionDef { .. }));
 
-        // Compile all function definitions first
-        for func_stmt in functions {
+        // Two-pass compilation for mutual recursion support:
+
+        // Pass 1: Declare all function signatures
+        for func_stmt in &functions {
             if let IRStmt::FunctionDef {
                 name,
                 params,
                 defaults,
-                body,
+                ..
             } = func_stmt
             {
-                self.compile_function_def(name, params, defaults, body)?;
+                self.declare_function(name, params, defaults);
+            }
+        }
+
+        // Pass 2: Compile all function bodies
+        for func_stmt in &functions {
+            if let IRStmt::FunctionDef {
+                name, params, body, ..
+            } = func_stmt
+            {
+                self.compile_function_body(name, params, body)?;
             }
         }
 
@@ -1717,13 +1729,14 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn compile_function_def(
+    /// Declares a function signature without compiling the body.
+    /// This is the first pass for supporting mutual recursion.
+    fn declare_function(
         &mut self,
         name: &str,
         params: &[String],
         defaults: &[Option<IRExpr>],
-        body: &[IRStmt],
-    ) -> Result<(), CodeGenError> {
+    ) -> FunctionValue<'ctx> {
         let pyobject_type = self.create_pyobject_type();
 
         // Create function signature: all params are PyObject, return type is PyObject
@@ -1736,11 +1749,27 @@ impl<'ctx> Compiler<'ctx> {
         self.function_defaults
             .insert(name.to_string(), defaults.to_vec());
 
+        function
+    }
+
+    /// Compiles the body of a previously declared function.
+    /// This is the second pass for supporting mutual recursion.
+    fn compile_function_body(
+        &mut self,
+        name: &str,
+        params: &[String],
+        body: &[IRStmt],
+    ) -> Result<(), CodeGenError> {
+        let function = *self
+            .functions
+            .get(name)
+            .ok_or_else(|| CodeGenError::UndefinedVariable(format!("function '{}'", name)))?;
+
         // Create entry block
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
-        // Save current variable scope (for nested functions, though we don't support them yet)
+        // Save current variable scope
         let saved_variables = self.variables.clone();
         self.variables.clear();
 
@@ -1769,6 +1798,19 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         Ok(())
+    }
+
+    /// Legacy method that combines declaration and compilation.
+    /// Kept for compatibility but now uses the two-pass approach.
+    fn compile_function_def(
+        &mut self,
+        name: &str,
+        params: &[String],
+        defaults: &[Option<IRExpr>],
+        body: &[IRStmt],
+    ) -> Result<(), CodeGenError> {
+        self.declare_function(name, params, defaults);
+        self.compile_function_body(name, params, body)
     }
 
     fn create_entry_block_alloca(
