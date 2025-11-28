@@ -726,6 +726,11 @@ impl<'ctx> Compiler<'ctx> {
                 });
                 self.builder.build_store(ptr, value).unwrap();
             }
+            IRStmt::ExprStmt(expr) => {
+                // Evaluate the expression and discard the result
+                // This is used for function calls that are executed for their side effects
+                self.compile_expression(expr)?;
+            }
             IRStmt::Return(expr) => {
                 let value = self.compile_expression(expr)?;
                 self.builder.build_return(Some(&value)).unwrap();

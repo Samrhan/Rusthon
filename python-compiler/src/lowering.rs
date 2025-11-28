@@ -26,6 +26,7 @@ pub fn lower_program(stmts: &[ast::Stmt]) -> Result<Vec<IRStmt>, LoweringError> 
 fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
     match stmt {
         ast::Stmt::Expr(ast::StmtExpr { value, .. }) => {
+            // Special handling for print() calls
             if let ast::Expr::Call(ast::ExprCall { func, args, .. }) = value.as_ref() {
                 if let ast::Expr::Name(ast::ExprName { id, .. }) = func.as_ref() {
                     if id == "print" {
@@ -36,7 +37,9 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                     }
                 }
             }
-            Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())))
+            // General expression statement (e.g., function call without using result)
+            let expr = lower_expression(value)?;
+            Ok(IRStmt::ExprStmt(expr))
         }
         ast::Stmt::Assign(ast::StmtAssign { targets, value, .. }) => {
             if targets.len() != 1 {

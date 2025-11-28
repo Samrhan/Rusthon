@@ -82,6 +82,8 @@ pub enum IRStmt {
     Print(Vec<IRExpr>),
     /// An assignment statement.
     Assign { target: String, value: IRExpr },
+    /// An expression statement (evaluates an expression and discards the result).
+    ExprStmt(IRExpr),
     /// A function definition.
     FunctionDef {
         name: String,
