@@ -1800,19 +1800,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Legacy method that combines declaration and compilation.
-    /// Kept for compatibility but now uses the two-pass approach.
-    fn compile_function_def(
-        &mut self,
-        name: &str,
-        params: &[String],
-        defaults: &[Option<IRExpr>],
-        body: &[IRStmt],
-    ) -> Result<(), CodeGenError> {
-        self.declare_function(name, params, defaults);
-        self.compile_function_body(name, params, body)
-    }
-
     fn create_entry_block_alloca(
         &self,
         name: &str,
