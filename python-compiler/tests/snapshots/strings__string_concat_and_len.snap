@@ -36,12 +36,12 @@ entry:
   %puts = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr63)
   %strlen = tail call i64 @strlen(ptr noundef nonnull dereferenceable(1) %payload_to_ptr63)
   %int_payload = and i64 %strlen, 281474976710655
-  %is_negative95.not = icmp ult i64 %int_payload, 140737488355328
-  %masksel = select i1 %is_negative95.not, i64 0, i64 -281474976710656
-  %signed_payload97 = or disjoint i64 %masksel, %int_payload
-  %payload_to_f6498 = sitofp i64 %signed_payload97 to double
-  %to_int107 = fptosi double %payload_to_f6498 to i64
-  %printf_int108 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.2, i64 %to_int107)
+  %is_negative99.not = icmp ult i64 %int_payload, 140737488355328
+  %masksel = select i1 %is_negative99.not, i64 0, i64 -281474976710656
+  %signed_payload101 = or disjoint i64 %masksel, %int_payload
+  %payload_to_f64102 = sitofp i64 %signed_payload101 to double
+  %to_int111 = fptosi double %payload_to_f64102 to i64
+  %printf_int112 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.2, i64 %to_int111)
   tail call void @free(ptr %malloc_str)
   tail call void @free(ptr %malloc_str1)
   ret i32 0

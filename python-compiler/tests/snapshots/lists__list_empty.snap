@@ -10,7 +10,8 @@ source_filename = "main"
 ; Function Attrs: nofree nounwind
 define noundef i32 @main() local_unnamed_addr #0 {
 entry:
-  %malloc_list = tail call ptr @malloc(i64 0)
+  %malloc_list = tail call dereferenceable_or_null(8) ptr @malloc(i64 8)
+  store i64 0, ptr %malloc_list, align 4
   %ptr_to_int = ptrtoint ptr %malloc_list to i64
   %list_ptr_payload = and i64 %ptr_to_int, 281474976710655
   %is_negative.not = icmp ult i64 %list_ptr_payload, 140737488355328

@@ -10,11 +10,13 @@ source_filename = "main"
 ; Function Attrs: nofree nounwind
 define noundef i32 @main() local_unnamed_addr #0 {
 entry:
-  %malloc_list = tail call dereferenceable_or_null(24) ptr @malloc(i64 24)
-  store i64 9221120237041090565, ptr %malloc_list, align 4
-  %elem_ptr_1 = getelementptr inbounds i64, ptr %malloc_list, i64 1
+  %malloc_list = tail call dereferenceable_or_null(32) ptr @malloc(i64 32)
+  store i64 3, ptr %malloc_list, align 4
+  %elem_ptr_0 = getelementptr inbounds i64, ptr %malloc_list, i64 1
+  store i64 9221120237041090565, ptr %elem_ptr_0, align 4
+  %elem_ptr_1 = getelementptr inbounds i64, ptr %malloc_list, i64 2
   store i64 9221120237041090575, ptr %elem_ptr_1, align 4
-  %elem_ptr_2 = getelementptr inbounds i64, ptr %malloc_list, i64 2
+  %elem_ptr_2 = getelementptr inbounds i64, ptr %malloc_list, i64 3
   store i64 9221120237041090580, ptr %elem_ptr_2, align 4
   %ptr_to_int82 = ptrtoint ptr %malloc_list to i64
   %list_ptr_payload = and i64 %ptr_to_int82, 281474976710655
