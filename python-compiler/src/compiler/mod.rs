@@ -5,7 +5,11 @@
 //! ## Architecture
 //! - `runtime`: External C function declarations (printf, malloc, etc.)
 //! - `values`: NaN-boxing type system for PyObject representation
-//! - More modules to be added during refactoring...
+//! - `generators`: Code generation modules (expression, statement, control flow)
+//!
+//! ## Refactoring Progress
+//! See `/REFACTORING_PROGRESS.md` for detailed progress and next steps.
 
+pub mod generators;
 pub mod runtime;
 pub mod values;
