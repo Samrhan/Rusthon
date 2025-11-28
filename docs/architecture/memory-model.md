@@ -1,6 +1,6 @@
 # Memory Model
 
-Rusthon uses a simple stack-based memory model with heap allocation only for strings.
+Rusthon uses a simple stack-based memory model with heap allocation for strings and lists.
 
 ## Memory Regions
 
@@ -9,7 +9,7 @@ Rusthon uses a simple stack-based memory model with heap allocation only for str
 │      Stack      │  Variables, parameters, temporaries
 │  (auto-managed) │
 ├─────────────────┤
-│      Heap       │  String literals only
+│      Heap       │  String literals and list data
 │   (malloc'ed)   │  ⚠️ Never freed (memory leak)
 └─────────────────┘
 ```
@@ -104,7 +104,7 @@ store %PyObject %result_val, ptr %result
 
 ### String Literals
 
-Strings are the **only** heap-allocated objects:
+Strings are heap-allocated with `malloc()`:
 
 ```python
 print("Hello, World!")
@@ -144,6 +144,73 @@ Heap:
 Stack:
   [str_obj] <- PyObject { tag: 3, payload: ptr_to_H }
 ```
+
+### Lists
+
+Lists are heap-allocated with a **length header** followed by elements:
+
+```python
+my_list = [10, 20, 30]
+print(len(my_list))
+```
+
+Generated LLVM:
+```llvm
+define i32 @main() {
+entry:
+  ; Allocate heap memory: (n+1) * 8 bytes
+  ; Where n=3 elements, +1 for length header
+  %list_ptr = call ptr @malloc(i64 32)
+
+  ; Store length at offset 0
+  store i64 3, ptr %list_ptr
+
+  ; Store element 0 at offset 1
+  %elem_ptr_0 = getelementptr i64, ptr %list_ptr, i64 1
+  store i64 9221120237041090570, ptr %elem_ptr_0  ; NaN-boxed 10
+
+  ; Store element 1 at offset 2
+  %elem_ptr_1 = getelementptr i64, ptr %list_ptr, i64 2
+  store i64 9221120237041090580, ptr %elem_ptr_1  ; NaN-boxed 20
+
+  ; Store element 2 at offset 3
+  %elem_ptr_2 = getelementptr i64, ptr %list_ptr, i64 3
+  store i64 9221120237041090590, ptr %elem_ptr_2  ; NaN-boxed 30
+
+  ; Create PyObject with list pointer
+  %ptr_int = ptrtoint ptr %list_ptr to i64
+  %list_obj = ... ; NaN-boxed list with TAG_LIST=3
+
+  ; Reading length for len()
+  %len_ptr = getelementptr i64, ptr %list_ptr, i64 0
+  %length = load i64, ptr %len_ptr  ; Returns 3
+
+  ; ⚠️ Memory is NEVER freed - this is a memory leak!
+
+  ret i32 0
+}
+```
+
+**Memory layout:**
+```
+Heap:
+  Offset:  0        1        2        3
+  Value:   3        10       20       30
+           ^length  ^elem[0] ^elem[1] ^elem[2]
+  Size: 32 bytes (4 × i64)
+       ↑
+       |
+Stack:
+  [list_obj] <- PyObject { tag: 4, payload: ptr_to_list }
+```
+
+**Key points:**
+- **Allocation size**: `(n + 1) * sizeof(i64)` = `(n + 1) * 8` bytes
+- **Offset 0**: List length (i64)
+- **Offset 1..n**: List elements (NaN-boxed i64 values)
+- **Indexing**: `list[i]` accesses offset `i + 1`
+- **len() operation**: O(1) - reads i64 at offset 0
+- **Memory overhead**: +8 bytes per list for length header
 
 ## Memory Lifecycle
 
@@ -308,11 +375,12 @@ Stack:
 ### Rusthon
 ```
 Stack:
-  All PyObject values (except strings)
+  All PyObject values (8 bytes each, NaN-boxed)
   Direct value storage
 
 Heap:
-  Only string data
+  String data (variable length)
+  List data (length header + elements)
   Never freed (leak)
 ```
 
@@ -340,17 +408,19 @@ Heap:
 **Cons:**
 - ❌ Can't return heap objects
 - ❌ Limited to short-lived programs
-- ❌ Strings leak memory
+- ❌ Strings and lists leak memory
 
-### Why Heap Strings?
+### Why Heap Strings and Lists?
 
 **Pros:**
 - ✅ Arbitrary length strings
 - ✅ String literals work
+- ✅ Dynamic-sized lists
+- ✅ O(1) len() operation for lists
 
 **Cons:**
 - ❌ Memory leaks
-- ❌ Inconsistent with other types
+- ❌ Inconsistent with primitive types (int, float, bool)
 
 ### Alternative: Arena Allocation
 
@@ -373,9 +443,9 @@ print(x)
 ```
 
 **Memory:**
-- Stack: 16 bytes (1 PyObject)
+- Stack: 8 bytes (1 PyObject, NaN-boxed)
 - Heap: 0 bytes
-- Total: 16 bytes
+- Total: 8 bytes
 
 ### Medium Program
 ```python
@@ -400,9 +470,20 @@ print("Rust")
 ```
 
 **Memory:**
-- Stack: ~48 bytes (temporaries)
+- Stack: ~24 bytes (3 PyObject temporaries, NaN-boxed)
 - Heap: 18 bytes (3 strings: 6+6+5+nulls, leaked)
-- Total: ~66 bytes
+- Total: ~42 bytes
+
+### List Program
+```python
+my_list = [10, 20, 30, 40, 50]
+print(len(my_list))
+```
+
+**Memory:**
+- Stack: 8 bytes (1 PyObject for list, NaN-boxed pointer)
+- Heap: 48 bytes (1 length header + 5 elements × 8 bytes, leaked)
+- Total: 56 bytes
 
 ## Debugging Memory Issues
 
@@ -440,17 +521,18 @@ def factorial(n):
 factorial(100000)  # Works fine
 ```
 
-### Memory Leaks (Strings)
+### Memory Leaks (Strings and Lists)
 
 **Detection:**
 ```bash
 valgrind ./program
-# Will report leaked string allocations
+# Will report leaked string and list allocations
 ```
 
 **Mitigation:**
-- Use strings sparingly
-- For long-running programs, consider rewriting without strings
+- Use strings and lists sparingly
+- For long-running programs, minimize dynamic allocations
+- Consider using fixed-size data where possible
 - Or implement arena allocation (future work)
 
 ## Next Steps
