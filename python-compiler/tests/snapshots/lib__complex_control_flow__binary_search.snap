@@ -1,0 +1,226 @@
+---
+source: tests/complex_control_flow.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+
+; Function Attrs: nofree nounwind
+define i64 @binary_search_helper(i64 %0, i64 %1, i64 %2) local_unnamed_addr #0 {
+entry:
+  %check_qnan124 = and i64 %0, 9221120237041090560
+  %is_float125.not = icmp eq i64 %check_qnan124, 9221120237041090560
+  %i64_to_f64126 = bitcast i64 %0 to double
+  %extract_payload127 = and i64 %0, 281474976710655
+  %is_negative129.not = icmp ult i64 %extract_payload127, 140737488355328
+  %masksel328 = select i1 %is_negative129.not, i64 0, i64 -281474976710656
+  %signed_payload131 = or disjoint i64 %masksel328, %extract_payload127
+  %payload_to_f64132 = sitofp i64 %signed_payload131 to double
+  %final_payload133 = select i1 %is_float125.not, double %payload_to_f64132, double %i64_to_f64126
+  br label %tailrecurse.outer
+
+tailrecurse.outer:                                ; preds = %add_merge208, %entry
+  %.tr329.ph = phi i64 [ %pyobject250, %add_merge208 ], [ %1, %entry ]
+  %.tr330.ph = phi i64 [ %.tr330342, %add_merge208 ], [ %2, %entry ]
+  %check_qnan = and i64 %.tr329.ph, 9221120237041090560
+  %is_float.not.not = icmp eq i64 %check_qnan, 9221120237041090560
+  %i64_to_f64 = bitcast i64 %.tr329.ph to double
+  %extract_payload = and i64 %.tr329.ph, 281474976710655
+  %is_negative.not = icmp ult i64 %extract_payload, 140737488355328
+  %masksel = select i1 %is_negative.not, i64 0, i64 -281474976710656
+  %signed_payload = or disjoint i64 %masksel, %extract_payload
+  %payload_to_f64 = sitofp i64 %signed_payload to double
+  %final_payload = select i1 %is_float.not.not, double %payload_to_f64, double %i64_to_f64
+  %check_qnan3332 = and i64 %.tr330.ph, 9221120237041090560
+  %is_float4.not.not333 = icmp eq i64 %check_qnan3332, 9221120237041090560
+  %i64_to_f645334 = bitcast i64 %.tr330.ph to double
+  %extract_payload6335 = and i64 %.tr330.ph, 281474976710655
+  %is_negative8.not336 = icmp ult i64 %extract_payload6335, 140737488355328
+  %masksel317337 = select i1 %is_negative8.not336, i64 0, i64 -281474976710656
+  %signed_payload10338 = or disjoint i64 %masksel317337, %extract_payload6335
+  %payload_to_f6411339 = sitofp i64 %signed_payload10338 to double
+  %final_payload12340 = select i1 %is_float4.not.not333, double %payload_to_f6411339, double %i64_to_f645334
+  %cmptmp341 = fcmp ogt double %final_payload, %final_payload12340
+  br i1 %cmptmp341, label %common.ret, label %ifcont.lr.ph
+
+ifcont.lr.ph:                                     ; preds = %tailrecurse.outer
+  %3 = and i64 %.tr329.ph, 1970324836974592
+  %is_list = icmp ne i64 %3, 844424930131968
+  %4 = and i64 %.tr329.ph, 9222809086901354496
+  %5 = icmp eq i64 %4, 9221683186994511872
+  %lhs_is_string = and i1 %is_list, %5
+  %payload_to_ptr = inttoptr i64 %extract_payload to ptr
+  br label %ifcont
+
+common.ret:                                       ; preds = %tailrecurse.outer, %ifcont190, %add_merge
+  %common.ret.op = phi i64 [ %pyobject111, %add_merge ], [ 9221401712017801215, %ifcont190 ], [ 9221401712017801215, %tailrecurse.outer ]
+  ret i64 %common.ret.op
+
+ifcont:                                           ; preds = %ifcont.lr.ph, %ifcont190
+  %final_payload12344 = phi double [ %final_payload12340, %ifcont.lr.ph ], [ %final_payload12, %ifcont190 ]
+  %extract_payload6343 = phi i64 [ %extract_payload6335, %ifcont.lr.ph ], [ %extract_payload6, %ifcont190 ]
+  %.tr330342 = phi i64 [ %.tr330.ph, %ifcont.lr.ph ], [ %pyobject304, %ifcont190 ]
+  %6 = and i64 %.tr330342, 1970324836974592
+  %is_list33 = icmp ne i64 %6, 844424930131968
+  %7 = and i64 %.tr330342, 9222809086901354496
+  %8 = icmp eq i64 %7, 9221683186994511872
+  %rhs_is_string = and i1 %is_list33, %8
+  %both_strings = and i1 %lhs_is_string, %rhs_is_string
+  br i1 %both_strings, label %str_concat, label %arithmetic
+
+str_concat:                                       ; preds = %ifcont
+  %payload_to_ptr39 = inttoptr i64 %extract_payload6343 to ptr
+  %lhs_len = tail call i64 @strlen(ptr noundef nonnull dereferenceable(1) %payload_to_ptr)
+  %rhs_len = tail call i64 @strlen(ptr noundef nonnull dereferenceable(1) %payload_to_ptr39)
+  %total_len = add i64 %rhs_len, 1
+  %total_size = add i64 %total_len, %lhs_len
+  %malloc_concat = tail call ptr @malloc(i64 %total_size)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %malloc_concat, ptr align 1 %payload_to_ptr, i64 %lhs_len, i1 false)
+  %rhs_dest = getelementptr i8, ptr %malloc_concat, i64 %lhs_len
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %rhs_dest, ptr align 1 %payload_to_ptr39, i64 %total_len, i1 false)
+  %ptr_to_int = ptrtoint ptr %malloc_concat to i64
+  %ptr_payload = and i64 %ptr_to_int, 281474976710655
+  %pyobject_string = or disjoint i64 %ptr_payload, 9221683186994511872
+  br label %add_merge
+
+arithmetic:                                       ; preds = %ifcont
+  %9 = and i64 %check_qnan, %.tr330342
+  %result_is_float.not = icmp eq i64 %9, 9221120237041090560
+  %addtmp = fadd double %final_payload, %final_payload12344
+  %float_to_i64 = bitcast double %addtmp to i64
+  %payload_to_i64 = fptosi double %addtmp to i64
+  %payload_masked = and i64 %payload_to_i64, 281474976710655
+  %nanboxed = or disjoint i64 %payload_masked, 9221120237041090560
+  %pyobject = select i1 %result_is_float.not, i64 %nanboxed, i64 %float_to_i64
+  br label %add_merge
+
+add_merge:                                        ; preds = %arithmetic, %str_concat
+  %add_result = phi i64 [ %pyobject_string, %str_concat ], [ %pyobject, %arithmetic ]
+  %check_qnan63 = and i64 %add_result, 9221120237041090560
+  %is_float64.not.not = icmp eq i64 %check_qnan63, 9221120237041090560
+  %i64_to_f6487 = bitcast i64 %add_result to double
+  %extract_payload88 = and i64 %add_result, 281474976710655
+  %is_negative90.not = icmp ult i64 %extract_payload88, 140737488355328
+  %masksel326 = select i1 %is_negative90.not, i64 0, i64 -281474976710656
+  %signed_payload92 = or disjoint i64 %masksel326, %extract_payload88
+  %payload_to_f6493 = sitofp i64 %signed_payload92 to double
+  %final_payload94 = select i1 %is_float64.not.not, double %payload_to_f6493, double %i64_to_f6487
+  %divtmp = fmul double %final_payload94, 5.000000e-01
+  %float_to_i6499 = bitcast double %divtmp to i64
+  %payload_to_i64106 = fptosi double %divtmp to i64
+  %payload_masked107 = and i64 %payload_to_i64106, 281474976710655
+  %nanboxed110 = or disjoint i64 %payload_masked107, 9221120237041090560
+  %pyobject111 = select i1 %is_float64.not.not, i64 %nanboxed110, i64 %float_to_i6499
+  %check_qnan114 = and i64 %pyobject111, 9221120237041090560
+  %is_float115.not.not.not = icmp eq i64 %check_qnan114, 9221120237041090560
+  %i64_to_f64116 = bitcast i64 %pyobject111 to double
+  %extract_payload117 = and i64 %pyobject111, 281474976710655
+  %is_negative119.not = icmp ult i64 %extract_payload117, 140737488355328
+  %masksel327 = select i1 %is_negative119.not, i64 0, i64 -281474976710656
+  %signed_payload121 = or disjoint i64 %masksel327, %extract_payload117
+  %payload_to_f64122 = sitofp i64 %signed_payload121 to double
+  %final_payload123 = select i1 %is_float115.not.not.not, double %payload_to_f64122, double %i64_to_f64116
+  %cmptmp134 = fcmp oeq double %final_payload123, %final_payload133
+  br i1 %cmptmp134, label %common.ret, label %ifcont150
+
+ifcont150:                                        ; preds = %add_merge
+  %cmptmp174 = fcmp olt double %final_payload123, %final_payload133
+  br i1 %cmptmp174, label %add_merge208, label %ifcont190
+
+ifcont190:                                        ; preds = %ifcont150
+  %subtmp = fadd double %final_payload123, -1.000000e+00
+  %float_to_i64292 = bitcast double %subtmp to i64
+  %payload_to_i64299 = fptosi double %subtmp to i64
+  %payload_masked300 = and i64 %payload_to_i64299, 281474976710655
+  %nanboxed303 = or disjoint i64 %payload_masked300, 9221120237041090560
+  %pyobject304 = select i1 %is_float115.not.not.not, i64 %nanboxed303, i64 %float_to_i64292
+  %check_qnan3 = and i64 %pyobject304, 9221120237041090560
+  %is_float4.not.not = icmp eq i64 %check_qnan3, 9221120237041090560
+  %i64_to_f645 = bitcast i64 %pyobject304 to double
+  %extract_payload6 = and i64 %pyobject304, 281474976710655
+  %is_negative8.not = icmp ult i64 %extract_payload6, 140737488355328
+  %masksel317 = select i1 %is_negative8.not, i64 0, i64 -281474976710656
+  %signed_payload10 = or disjoint i64 %masksel317, %extract_payload6
+  %payload_to_f6411 = sitofp i64 %signed_payload10 to double
+  %final_payload12 = select i1 %is_float4.not.not, double %payload_to_f6411, double %i64_to_f645
+  %cmptmp = fcmp ogt double %final_payload, %final_payload12
+  br i1 %cmptmp, label %common.ret, label %ifcont
+
+add_merge208:                                     ; preds = %ifcont150
+  %addtmp235 = fadd double %final_payload123, 1.000000e+00
+  %payload_to_i64245 = fptosi double %addtmp235 to i64
+  %payload_masked246 = and i64 %payload_to_i64245, 281474976710655
+  %nanboxed249 = or disjoint i64 %payload_masked246, 9221120237041090560
+  %float_to_i64238 = bitcast double %addtmp235 to i64
+  %pyobject250 = select i1 %is_float115.not.not.not, i64 %nanboxed249, i64 %float_to_i64238
+  br label %tailrecurse.outer
+}
+
+; Function Attrs: mustprogress nofree nounwind willreturn memory(argmem: read)
+declare i64 @strlen(ptr nocapture) local_unnamed_addr #1
+
+; Function Attrs: mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite)
+declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #2
+
+; Function Attrs: nofree nounwind
+define noundef i32 @main() local_unnamed_addr #0 {
+entry:
+  %calltmp = tail call i64 @binary_search_helper(i64 9221120237041090567, i64 9221120237041090560, i64 9221120237041090570)
+  %check_qnan = and i64 %calltmp, 9221120237041090560
+  %is_float.not = icmp eq i64 %check_qnan, 9221120237041090560
+  %tag_bits = lshr i64 %calltmp, 48
+  %tag = and i64 %tag_bits, 7
+  %is_bool = icmp eq i64 %tag, 1
+  %is_string = icmp eq i64 %tag, 2
+  %is_list = icmp eq i64 %tag, 3
+  %0 = trunc i64 %tag_bits to i3
+  %1 = select i1 %is_bool, i3 2, i3 %0
+  %2 = select i1 %is_string, i3 3, i3 %1
+  %3 = select i1 %is_list, i3 -4, i3 %2
+  %i64_to_f64 = bitcast i64 %calltmp to double
+  %extract_payload = and i64 %calltmp, 281474976710655
+  %is_negative.not = icmp ult i64 %extract_payload, 140737488355328
+  %masksel = select i1 %is_negative.not, i64 0, i64 -281474976710656
+  %signed_payload = or disjoint i64 %masksel, %extract_payload
+  %payload_to_f64 = sitofp i64 %signed_payload to double
+  %final_payload = select i1 %is_float.not, double %payload_to_f64, double %i64_to_f64
+  %trunc = select i1 %is_float.not, i3 %3, i3 1
+  switch i3 %trunc, label %print_float [
+    i3 3, label %print_string
+    i3 0, label %print_int
+  ]
+
+print_int:                                        ; preds = %entry
+  %to_int = fptosi double %final_payload to i64
+  %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 %to_int)
+  br label %print_end
+
+print_float:                                      ; preds = %entry
+  %printf_float = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string, double %final_payload)
+  br label %print_end
+
+print_string:                                     ; preds = %entry
+  %payload_to_ptr = inttoptr i64 %extract_payload to ptr
+  %puts = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr)
+  br label %print_end
+
+print_end:                                        ; preds = %print_string, %print_float, %print_int
+  ret i32 0
+}
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #0
+
+; Function Attrs: nocallback nofree nounwind willreturn memory(argmem: readwrite)
+declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg) #3
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @puts(ptr nocapture noundef readonly) local_unnamed_addr #0
+
+attributes #0 = { nofree nounwind }
+attributes #1 = { mustprogress nofree nounwind willreturn memory(argmem: read) }
+attributes #2 = { mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite) "alloc-family"="malloc" }
+attributes #3 = { nocallback nofree nounwind willreturn memory(argmem: readwrite) }

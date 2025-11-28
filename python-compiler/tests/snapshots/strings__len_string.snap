@@ -7,100 +7,45 @@ source_filename = "main"
 
 @str_literal = private unnamed_addr constant [6 x i8] c"Hello\00", align 1
 @int_format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
-@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
-@string_format_string = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
 
-define i32 @main() {
+; Function Attrs: nounwind
+define noundef i32 @main() local_unnamed_addr #0 {
 entry:
-  %n = alloca i64, align 8
-  %s = alloca i64, align 8
-  %malloc_str = call ptr @malloc(i64 6)
-  %memcpy_str = call ptr @memcpy(ptr %malloc_str, ptr @str_literal, i64 6)
+  %malloc_str = tail call dereferenceable_or_null(6) ptr @malloc(i64 6)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(6) %malloc_str, ptr noundef nonnull align 1 dereferenceable(6) @str_literal, i64 6, i1 false)
   %ptr_to_int = ptrtoint ptr %malloc_str to i64
   %ptr_payload = and i64 %ptr_to_int, 281474976710655
-  %pyobject_string = or i64 9221683186994511872, %ptr_payload
-  store i64 %pyobject_string, ptr %s, align 4
-  %s1 = load i64, ptr %s, align 4
-  %check_qnan = and i64 %s1, 9221120237041090560
-  %is_float = icmp ne i64 %check_qnan, 9221120237041090560
-  %tag_bits = and i64 %s1, 1970324836974592
-  %tag = lshr i64 %tag_bits, 48
-  %is_bool = icmp eq i64 %tag, 1
-  %is_string = icmp eq i64 %tag, 2
-  %is_list = icmp eq i64 %tag, 3
-  %map_bool = select i1 %is_bool, i64 2, i64 %tag
-  %map_string = select i1 %is_string, i64 3, i64 %map_bool
-  %map_list = select i1 %is_list, i64 4, i64 %map_string
-  %final_tag = select i1 %is_float, i64 1, i64 %map_list
-  %is_string2 = icmp eq i64 %final_tag, 3
-  br i1 %is_string2, label %string_len, label %other_len
-
-string_len:                                       ; preds = %entry
-  %extract_ptr_payload = and i64 %s1, 281474976710655
-  %payload_to_ptr = inttoptr i64 %extract_ptr_payload to ptr
-  %strlen = call i64 @strlen(ptr %payload_to_ptr)
+  %payload_to_ptr = inttoptr i64 %ptr_payload to ptr
+  %strlen = tail call i64 @strlen(ptr noundef nonnull dereferenceable(1) %payload_to_ptr)
   %int_payload = and i64 %strlen, 281474976710655
-  %pyobject_int = or i64 9221120237041090560, %int_payload
-  br label %len_merge
-
-other_len:                                        ; preds = %entry
-  br label %len_merge
-
-len_merge:                                        ; preds = %other_len, %string_len
-  %len_result = phi i64 [ %pyobject_int, %string_len ], [ 9221120237041090560, %other_len ]
-  store i64 %len_result, ptr %n, align 4
-  %n3 = load i64, ptr %n, align 4
-  %check_qnan4 = and i64 %n3, 9221120237041090560
-  %is_float5 = icmp ne i64 %check_qnan4, 9221120237041090560
-  %tag_bits6 = and i64 %n3, 1970324836974592
-  %tag7 = lshr i64 %tag_bits6, 48
-  %is_bool8 = icmp eq i64 %tag7, 1
-  %is_string9 = icmp eq i64 %tag7, 2
-  %is_list10 = icmp eq i64 %tag7, 3
-  %map_bool11 = select i1 %is_bool8, i64 2, i64 %tag7
-  %map_string12 = select i1 %is_string9, i64 3, i64 %map_bool11
-  %map_list13 = select i1 %is_list10, i64 4, i64 %map_string12
-  %final_tag14 = select i1 %is_float5, i64 1, i64 %map_list13
-  %check_qnan15 = and i64 %n3, 9221120237041090560
-  %is_float16 = icmp ne i64 %check_qnan15, 9221120237041090560
-  %i64_to_f64 = bitcast i64 %n3 to double
-  %extract_payload = and i64 %n3, 281474976710655
-  %sign_bit = lshr i64 %extract_payload, 47
-  %is_negative = icmp eq i64 %sign_bit, 1
-  %sign_extend = or i64 %extract_payload, -281474976710656
-  %signed_payload = select i1 %is_negative, i64 %sign_extend, i64 %extract_payload
+  %is_negative.not = icmp ult i64 %int_payload, 140737488355328
+  %masksel = select i1 %is_negative.not, i64 0, i64 -281474976710656
+  %signed_payload = or disjoint i64 %masksel, %int_payload
   %payload_to_f64 = sitofp i64 %signed_payload to double
-  %final_payload = select i1 %is_float16, double %i64_to_f64, double %payload_to_f64
-  %is_int = icmp eq i64 %final_tag14, 0
-  %is_string17 = icmp eq i64 %final_tag14, 3
-  br i1 %is_string17, label %print_string, label %check_int
-
-check_int:                                        ; preds = %len_merge
-  br i1 %is_int, label %print_int, label %print_float
-
-print_int:                                        ; preds = %check_int
-  %to_int = fptosi double %final_payload to i64
-  %printf_int = call i32 (ptr, ...) @printf(ptr @int_format_string, i64 %to_int)
-  br label %print_end
-
-print_float:                                      ; preds = %check_int
-  %printf_float = call i32 (ptr, ...) @printf(ptr @float_format_string, double %final_payload)
-  br label %print_end
-
-print_string:                                     ; preds = %len_merge
-  %extract_ptr_payload18 = and i64 %n3, 281474976710655
-  %payload_to_ptr19 = inttoptr i64 %extract_ptr_payload18 to ptr
-  %printf_string = call i32 (ptr, ...) @printf(ptr @string_format_string, ptr %payload_to_ptr19)
-  br label %print_end
-
-print_end:                                        ; preds = %print_string, %print_float, %print_int
+  %to_int = fptosi double %payload_to_f64 to i64
+  %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 %to_int)
+  tail call void @free(ptr %malloc_str)
   ret i32 0
 }
 
-declare ptr @malloc(i64)
+; Function Attrs: mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite)
+declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #1
 
-declare ptr @memcpy(ptr, ptr, i64)
+; Function Attrs: mustprogress nofree nounwind willreturn memory(argmem: read)
+declare i64 @strlen(ptr nocapture) local_unnamed_addr #2
 
-declare i64 @strlen(ptr)
+; Function Attrs: nofree nounwind
+declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #3
 
-declare i32 @printf(ptr, ...)
+; Function Attrs: mustprogress nounwind willreturn allockind("free") memory(argmem: readwrite, inaccessiblemem: readwrite)
+declare void @free(ptr allocptr nocapture noundef) local_unnamed_addr #4
+
+; Function Attrs: nocallback nofree nounwind willreturn memory(argmem: readwrite)
+declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg) #5
+
+attributes #0 = { nounwind }
+attributes #1 = { mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite) "alloc-family"="malloc" }
+attributes #2 = { mustprogress nofree nounwind willreturn memory(argmem: read) }
+attributes #3 = { nofree nounwind }
+attributes #4 = { mustprogress nounwind willreturn allockind("free") memory(argmem: readwrite, inaccessiblemem: readwrite) "alloc-family"="malloc" }
+attributes #5 = { nocallback nofree nounwind willreturn memory(argmem: readwrite) }

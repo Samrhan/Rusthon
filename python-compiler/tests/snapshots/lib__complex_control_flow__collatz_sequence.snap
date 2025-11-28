@@ -1,0 +1,63 @@
+---
+source: tests/complex_control_flow.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string.1 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+
+; Function Attrs: nofree nounwind
+define noundef i32 @main() local_unnamed_addr #0 {
+entry:
+  br label %print_int
+
+print_int:                                        ; preds = %entry, %ifcont
+  %payload_to_f64267 = phi double [ 1.000000e+01, %entry ], [ %payload_to_f64, %ifcont ]
+  %to_int = fptosi double %payload_to_f64267 to i64
+  %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int)
+  %modtmp = frem double %payload_to_f64267, 2.000000e+00
+  %payload_to_i64 = fptosi double %modtmp to i64
+  %payload_masked = and i64 %payload_to_i64, 281474976710655
+  %is_negative67.not = icmp ult i64 %payload_masked, 140737488355328
+  %masksel265 = select i1 %is_negative67.not, i64 0, i64 -281474976710656
+  %signed_payload69 = or disjoint i64 %masksel265, %payload_masked
+  %cmptmp72 = icmp eq i64 %signed_payload69, 0
+  br i1 %cmptmp72, label %then, label %add_merge
+
+then:                                             ; preds = %print_int
+  %divtmp = fmul double %payload_to_f64267, 5.000000e-01
+  br label %ifcont
+
+ifcont:                                           ; preds = %add_merge, %then
+  %n.1.in.in.in = phi double [ %divtmp, %then ], [ %addtmp, %add_merge ]
+  %n.1.in.in = fptosi double %n.1.in.in.in to i64
+  %n.1.in = and i64 %n.1.in.in, 281474976710655
+  %is_negative.not = icmp ult i64 %n.1.in, 140737488355328
+  %masksel = select i1 %is_negative.not, i64 0, i64 -281474976710656
+  %signed_payload = or disjoint i64 %masksel, %n.1.in
+  %payload_to_f64 = sitofp i64 %signed_payload to double
+  %cmptmp.not = icmp eq i64 %signed_payload, 1
+  br i1 %cmptmp.not, label %print_int250, label %print_int
+
+add_merge:                                        ; preds = %print_int
+  %multmp = fmul double %payload_to_f64267, 3.000000e+00
+  %payload_to_i64179 = fptosi double %multmp to i64
+  %payload_masked180 = and i64 %payload_to_i64179, 281474976710655
+  %is_negative203.not = icmp ult i64 %payload_masked180, 140737488355328
+  %masksel266 = select i1 %is_negative203.not, i64 0, i64 -281474976710656
+  %signed_payload205 = or disjoint i64 %masksel266, %payload_masked180
+  %payload_to_f64206 = sitofp i64 %signed_payload205 to double
+  %addtmp = fadd double %payload_to_f64206, 1.000000e+00
+  br label %ifcont
+
+print_int250:                                     ; preds = %ifcont
+  %to_int254 = fptosi double %payload_to_f64 to i64
+  %printf_int255 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int254)
+  ret i32 0
+}
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #0
+
+attributes #0 = { nofree nounwind }

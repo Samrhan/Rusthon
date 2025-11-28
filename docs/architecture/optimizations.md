@@ -13,80 +13,96 @@ Rusthon implements several optimization strategies to improve performance and re
 
 ### Overview
 
-The compiler leverages LLVM's built-in optimization passes to improve the quality of generated native code. These optimizations are applied after IR generation but before final code emission.
+The compiler uses LLVM 18's new pass manager to apply optimizations to generated code. The new pass manager provides better optimization coverage and performance compared to the legacy pass manager.
 
-### Enabled Passes
+### Pass Pipeline
 
-The following optimization passes are enabled by default:
+The compiler uses the `default<O2>` optimization pipeline, which applies moderate optimizations suitable for general use:
+
+```rust
+// Initialize LLVM targets
+Target::initialize_all(&InitializationConfig::default());
+
+// Create target machine for the default triple
+let triple = TargetMachine::get_default_triple();
+let target = Target::from_triple(&triple)?;
+let machine = target.create_target_machine(
+    &triple,
+    "generic",
+    "",
+    OptimizationLevel::Default,
+    RelocMode::Default,
+    CodeModel::Default,
+)?;
+
+// Configure pass builder options
+let pass_options = PassBuilderOptions::create();
+pass_options.set_verify_each(true);
+pass_options.set_loop_vectorization(true);
+pass_options.set_loop_slp_vectorization(true);
+pass_options.set_loop_unrolling(true);
+pass_options.set_merge_functions(true);
+
+// Run the optimization pipeline
+module.run_passes("default<O2>", &machine, pass_options)?;
+```
+
+### Enabled Optimizations
+
+The `default<O2>` pipeline includes:
 
 #### 1. Instruction Combining
-```rust
-fpm.add_instruction_combining_pass();
-```
 - Combines redundant instructions
 - Simplifies arithmetic operations
 - Example: `x + 0` → `x`, `x * 1` → `x`
 
-#### 2. Reassociate
-```rust
-fpm.add_reassociate_pass();
-```
-- Reassociates commutative expressions for better optimization
-- Example: `(a + b) + c` → `a + (b + c)` if beneficial
+#### 2. Dead Code Elimination
+- Removes unused code and variables
+- Eliminates unreachable basic blocks
 
 #### 3. GVN (Global Value Numbering)
-```rust
-fpm.add_gvn_pass();
-```
 - Eliminates redundant computations
 - Performs common subexpression elimination
 - Example: If `x = a + b` appears twice, compute once
 
 #### 4. CFG Simplification
-```rust
-fpm.add_cfg_simplification_pass();
-```
 - Removes unreachable code
 - Merges redundant basic blocks
 - Simplifies branch instructions
 
 #### 5. Promote Memory to Register
-```rust
-fpm.add_promote_memory_to_register_pass();
-```
 - Converts stack allocations to SSA registers where possible
 - Reduces memory traffic
 - Enables better optimization opportunities
 
-#### 6. Basic Alias Analysis
-```rust
-fpm.add_basic_alias_analysis_pass();
-```
-- Analyzes memory dependencies
-- Enables more aggressive optimizations
+#### 6. Loop Optimizations
+- **Loop Vectorization**: Converts scalar operations to vector operations
+- **SLP Vectorization**: Superword-level parallelism for straight-line code
+- **Loop Unrolling**: Reduces loop overhead by duplicating loop bodies
 
 #### 7. Function Inlining
-```rust
-fpm.add_function_inlining_pass();
-```
 - Inlines small functions at call sites
 - Reduces function call overhead
 - Enables further optimizations
 
-#### 8. Tail Call Elimination
-```rust
-fpm.add_tail_call_elimination_pass();
-```
-- Converts tail-recursive calls to loops
-- Prevents stack overflow in recursive functions
-- Reduces function call overhead
+#### 8. Function Merging
+- Merges identical functions to reduce code size
+- Particularly effective for template-heavy code
 
 ### Optimization Level
 
-The compiler uses `OptimizationLevel::Default`, which corresponds to `-O2` in LLVM:
+The compiler uses the `default<O2>` pipeline, which provides:
+- Good runtime performance
+- Reasonable compile times
+- Balanced code size
 
-```rust
-pass_manager_builder.set_optimization_level(OptimizationLevel::Default);
+Alternative pipelines can be used by modifying the pass string:
+- `default<O0>`: No optimizations (fastest compilation)
+- `default<O1>`: Basic optimizations
+- `default<O2>`: Moderate optimizations (default)
+- `default<O3>`: Aggressive optimizations
+- `default<Os>`: Optimize for size
+- `default<Oz>`: Aggressively optimize for size
 ```
 
 ### Impact

@@ -1,0 +1,86 @@
+---
+source: tests/complex_control_flow.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string.1 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+
+; Function Attrs: nofree norecurse nosync nounwind memory(none)
+define noundef i64 @is_prime(i64 %0) local_unnamed_addr #0 {
+entry:
+  %check_qnan = and i64 %0, 9221120237041090560
+  %is_float.not.not = icmp eq i64 %check_qnan, 9221120237041090560
+  %i64_to_f64 = bitcast i64 %0 to double
+  %extract_payload = and i64 %0, 281474976710655
+  %is_negative.not = icmp ult i64 %extract_payload, 140737488355328
+  %masksel = select i1 %is_negative.not, i64 0, i64 -281474976710656
+  %signed_payload = or disjoint i64 %masksel, %extract_payload
+  %payload_to_f64 = sitofp i64 %signed_payload to double
+  %final_payload = select i1 %is_float.not.not, double %payload_to_f64, double %i64_to_f64
+  %cmptmp = fcmp ugt double %final_payload, 1.000000e+00
+  br i1 %cmptmp, label %ifcont, label %common.ret
+
+common.ret:                                       ; preds = %add_merge, %loop_body, %ifcont, %entry
+  %common.ret.op = phi i64 [ 9221120237041090560, %entry ], [ 9221120237041090561, %ifcont ], [ 9221120237041090561, %add_merge ], [ 9221120237041090560, %loop_body ]
+  ret i64 %common.ret.op
+
+ifcont:                                           ; preds = %entry
+  %cmptmp23 = fcmp ole double %final_payload, 3.000000e+00
+  %cmptmp121294 = fcmp ult double %final_payload, 4.000000e+00
+  %or.cond = or i1 %cmptmp23, %cmptmp121294
+  br i1 %or.cond, label %common.ret, label %loop_body
+
+loop_body:                                        ; preds = %ifcont, %add_merge
+  %payload_to_f6485295 = phi double [ %payload_to_f6485, %add_merge ], [ 2.000000e+00, %ifcont ]
+  %modtmp = frem double %final_payload, %payload_to_f6485295
+  %float_to_i64206 = bitcast double %modtmp to i64
+  %payload_to_i64213 = fptosi double %modtmp to i64
+  %payload_masked214 = and i64 %payload_to_i64213, 281474976710655
+  %nanboxed217 = or disjoint i64 %payload_masked214, 9221120237041090560
+  %pyobject218 = select i1 %is_float.not.not, i64 %nanboxed217, i64 %float_to_i64206
+  %check_qnan219 = and i64 %pyobject218, 9221120237041090560
+  %is_float220.not = icmp eq i64 %check_qnan219, 9221120237041090560
+  %i64_to_f64221 = bitcast i64 %pyobject218 to double
+  %extract_payload222 = and i64 %pyobject218, 281474976710655
+  %is_negative224.not = icmp ult i64 %extract_payload222, 140737488355328
+  %masksel293 = select i1 %is_negative224.not, i64 0, i64 -281474976710656
+  %signed_payload226 = or disjoint i64 %masksel293, %extract_payload222
+  %payload_to_f64227 = sitofp i64 %signed_payload226 to double
+  %final_payload228 = select i1 %is_float220.not, double %payload_to_f64227, double %i64_to_f64221
+  %cmptmp229 = fcmp oeq double %final_payload228, 0.000000e+00
+  br i1 %cmptmp229, label %common.ret, label %add_merge
+
+add_merge:                                        ; preds = %loop_body
+  %addtmp = fadd double %payload_to_f6485295, 1.000000e+00
+  %payload_to_i64279 = fptosi double %addtmp to i64
+  %payload_masked280 = and i64 %payload_to_i64279, 281474976710655
+  %is_negative82.not = icmp ult i64 %payload_masked280, 140737488355328
+  %masksel291 = select i1 %is_negative82.not, i64 0, i64 -281474976710656
+  %signed_payload84 = or disjoint i64 %masksel291, %payload_masked280
+  %payload_to_f6485 = sitofp i64 %signed_payload84 to double
+  %multmp = fmul double %payload_to_f6485, %payload_to_f6485
+  %payload_to_i64 = fptosi double %multmp to i64
+  %payload_masked = and i64 %payload_to_i64, 281474976710655
+  %is_negative106.not = icmp ult i64 %payload_masked, 140737488355328
+  %masksel292 = select i1 %is_negative106.not, i64 0, i64 -281474976710656
+  %signed_payload108 = or disjoint i64 %masksel292, %payload_masked
+  %payload_to_f64109 = sitofp i64 %signed_payload108 to double
+  %cmptmp121 = fcmp ult double %final_payload, %payload_to_f64109
+  br i1 %cmptmp121, label %common.ret, label %loop_body
+}
+
+; Function Attrs: nofree nounwind
+define noundef i32 @main() local_unnamed_addr #1 {
+is_prime.exit69:
+  %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 1)
+  %printf_int34 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 0)
+  ret i32 0
+}
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #1
+
+attributes #0 = { nofree norecurse nosync nounwind memory(none) }
+attributes #1 = { nofree nounwind }

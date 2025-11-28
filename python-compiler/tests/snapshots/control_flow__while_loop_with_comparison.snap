@@ -1,0 +1,29 @@
+---
+source: tests/control_flow.rs
+expression: compile_source(source)
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+
+; Function Attrs: nofree nounwind
+define noundef i32 @main() local_unnamed_addr #0 {
+entry:
+  %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 10)
+  %printf_int.1 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 9)
+  %printf_int.2 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 8)
+  %printf_int.3 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 7)
+  %printf_int.4 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 6)
+  %printf_int.5 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 5)
+  %printf_int.6 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 4)
+  %printf_int.7 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 3)
+  %printf_int.8 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 2)
+  %printf_int.9 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 1)
+  ret i32 0
+}
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #0
+
+attributes #0 = { nofree nounwind }
