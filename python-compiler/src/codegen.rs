@@ -572,8 +572,9 @@ impl<'ctx> Compiler<'ctx> {
 
         // Create target machine
         let triple = TargetMachine::get_default_triple();
-        let target = Target::from_triple(&triple)
-            .map_err(|e| CodeGenError::ModuleVerification(format!("Failed to get target: {}", e)))?;
+        let target = Target::from_triple(&triple).map_err(|e| {
+            CodeGenError::ModuleVerification(format!("Failed to get target: {}", e))
+        })?;
 
         let machine = target
             .create_target_machine(
@@ -584,7 +585,9 @@ impl<'ctx> Compiler<'ctx> {
                 RelocMode::Default,
                 CodeModel::Default,
             )
-            .ok_or_else(|| CodeGenError::ModuleVerification("Failed to create target machine".to_string()))?;
+            .ok_or_else(|| {
+                CodeGenError::ModuleVerification("Failed to create target machine".to_string())
+            })?;
 
         // Configure pass builder options
         let pass_options = PassBuilderOptions::create();
@@ -605,7 +608,9 @@ impl<'ctx> Compiler<'ctx> {
         // - Inlining
         self.module
             .run_passes("default<O2>", &machine, pass_options)
-            .map_err(|e| CodeGenError::ModuleVerification(format!("Optimization passes failed: {}", e)))?;
+            .map_err(|e| {
+                CodeGenError::ModuleVerification(format!("Optimization passes failed: {}", e))
+            })?;
 
         Ok(())
     }
