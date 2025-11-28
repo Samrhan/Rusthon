@@ -1,7 +1,8 @@
 use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt, UnaryOp};
+use crate::compiler::runtime::{FormatStrings, Runtime};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::module::{Linkage, Module};
+use inkwell::module::Module;
 use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine};
 use inkwell::values::{FloatValue, FunctionValue, IntValue, PointerValue};
@@ -57,12 +58,18 @@ pub struct Compiler<'ctx> {
     string_arena: Vec<PointerValue<'ctx>>,
     // The entry block of the main function (used to check if strings can be safely tracked)
     main_entry_block: Option<inkwell::basic_block::BasicBlock<'ctx>>,
+    // Runtime manager for external C functions
+    runtime: Runtime<'ctx>,
+    // Format strings manager for printf/scanf
+    format_strings: FormatStrings<'ctx>,
 }
 
 impl<'ctx> Compiler<'ctx> {
     pub fn new(context: &'ctx Context) -> Self {
         let builder = context.create_builder();
         let module = context.create_module("main");
+        let runtime = Runtime::new(context);
+        let format_strings = FormatStrings::new(context);
         Self {
             context,
             builder,
@@ -73,6 +80,8 @@ impl<'ctx> Compiler<'ctx> {
             loop_stack: Vec::new(),
             string_arena: Vec::new(),
             main_entry_block: None,
+            runtime,
+            format_strings,
         }
     }
 
@@ -679,7 +688,7 @@ impl<'ctx> Compiler<'ctx> {
         // Note: We accept that strings allocated in functions may leak, as we only
         // track strings allocated in main. A full solution would require reference
         // counting or garbage collection, which is beyond the scope of this compiler.
-        let free_fn = self.add_free();
+        let free_fn = self.runtime.add_free(&self.module);
         for str_ptr in &self.string_arena {
             self.builder
                 .build_call(free_fn, &[(*str_ptr).into()], "free_str")
@@ -713,11 +722,14 @@ impl<'ctx> Compiler<'ctx> {
                 // Handle print with multiple arguments
                 if exprs.is_empty() {
                     // print() with no arguments just prints a newline
-                    let printf = self.add_printf();
+                    let printf = self.runtime.add_printf(&self.module);
                     self.builder
                         .build_call(
                             printf,
-                            &[self.get_newline_format_string().into()],
+                            &[self
+                                .format_strings
+                                .get_newline_format_string(&self.builder)
+                                .into()],
                             "printf_newline",
                         )
                         .unwrap();
@@ -732,11 +744,14 @@ impl<'ctx> Compiler<'ctx> {
 
                         // Print a space between arguments (but not after the last one)
                         if !is_last {
-                            let printf = self.add_printf();
+                            let printf = self.runtime.add_printf(&self.module);
                             self.builder
                                 .build_call(
                                     printf,
-                                    &[self.get_space_format_string().into()],
+                                    &[self
+                                        .format_strings
+                                        .get_space_format_string(&self.builder)
+                                        .into()],
                                     "printf_space",
                                 )
                                 .unwrap();
@@ -1064,7 +1079,7 @@ impl<'ctx> Compiler<'ctx> {
                     let rhs_str_ptr = self.extract_string_ptr(rhs_obj);
 
                     // Get lengths of both strings using strlen
-                    let strlen_fn = self.add_strlen();
+                    let strlen_fn = self.runtime.add_strlen(&self.module);
                     let lhs_len_result = self
                         .builder
                         .build_call(strlen_fn, &[lhs_str_ptr.into()], "lhs_len")
@@ -1105,7 +1120,7 @@ impl<'ctx> Compiler<'ctx> {
                         .unwrap();
 
                     // Allocate memory for concatenated string
-                    let malloc_fn = self.add_malloc();
+                    let malloc_fn = self.runtime.add_malloc(&self.module);
                     let concat_ptr_result = self
                         .builder
                         .build_call(malloc_fn, &[total_size.into()], "malloc_concat")
@@ -1120,7 +1135,7 @@ impl<'ctx> Compiler<'ctx> {
                     };
 
                     // Copy first string
-                    let memcpy_fn = self.add_memcpy();
+                    let memcpy_fn = self.runtime.add_memcpy(&self.module);
                     self.builder
                         .build_call(
                             memcpy_fn,
@@ -1427,8 +1442,10 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             IRExpr::Input => {
-                let scanf = self.add_scanf();
-                let format_string = self.get_scanf_float_format_string();
+                let scanf = self.runtime.add_scanf(&self.module);
+                let format_string = self
+                    .format_strings
+                    .get_scanf_float_format_string(&self.builder);
 
                 // Allocate space for the input value
                 let input_alloca = self
@@ -1516,7 +1533,7 @@ impl<'ctx> Compiler<'ctx> {
                 // String length block
                 self.builder.position_at_end(string_len_block);
                 let str_ptr = self.extract_string_ptr(arg_obj);
-                let strlen_fn = self.add_strlen();
+                let strlen_fn = self.runtime.add_strlen(&self.module);
                 let len_result = self
                     .builder
                     .build_call(strlen_fn, &[str_ptr.into()], "strlen")
@@ -1593,7 +1610,7 @@ impl<'ctx> Compiler<'ctx> {
                 let size = self.context.i64_type().const_int(str_len as u64, false);
 
                 // Call malloc to allocate memory
-                let malloc_fn = self.add_malloc();
+                let malloc_fn = self.runtime.add_malloc(&self.module);
                 let malloc_result = self
                     .builder
                     .build_call(malloc_fn, &[size.into()], "malloc_str")
@@ -1617,7 +1634,7 @@ impl<'ctx> Compiler<'ctx> {
                     .unwrap();
 
                 // Use memcpy to copy the string to the allocated memory
-                let memcpy_fn = self.add_memcpy();
+                let memcpy_fn = self.runtime.add_memcpy(&self.module);
                 self.builder
                     .build_call(
                         memcpy_fn,
@@ -1711,7 +1728,7 @@ impl<'ctx> Compiler<'ctx> {
                     .unwrap();
 
                 // Allocate the list
-                let malloc_fn = self.add_malloc();
+                let malloc_fn = self.runtime.add_malloc(&self.module);
                 let list_ptr_result = self
                     .builder
                     .build_call(malloc_fn, &[total_size.into()], "malloc_list")
@@ -1892,141 +1909,8 @@ impl<'ctx> Compiler<'ctx> {
         builder.build_alloca(pyobject_type, name).unwrap()
     }
 
-    fn add_printf(&self) -> FunctionValue<'ctx> {
-        if let Some(function) = self.module.get_function("printf") {
-            return function;
-        }
-        let i32_type = self.context.i32_type();
-        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let printf_type = i32_type.fn_type(&[i8_ptr_type.into()], true);
-        self.module
-            .add_function("printf", printf_type, Some(Linkage::External))
-    }
-
-    fn add_scanf(&self) -> FunctionValue<'ctx> {
-        if let Some(function) = self.module.get_function("scanf") {
-            return function;
-        }
-        let i32_type = self.context.i32_type();
-        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let scanf_type = i32_type.fn_type(&[i8_ptr_type.into()], true);
-        self.module
-            .add_function("scanf", scanf_type, Some(Linkage::External))
-    }
-
-    fn add_malloc(&self) -> FunctionValue<'ctx> {
-        if let Some(function) = self.module.get_function("malloc") {
-            return function;
-        }
-        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let size_type = self.context.i64_type(); // size_t is typically i64
-        let malloc_type = i8_ptr_type.fn_type(&[size_type.into()], false);
-        self.module
-            .add_function("malloc", malloc_type, Some(Linkage::External))
-    }
-
-    fn add_memcpy(&self) -> FunctionValue<'ctx> {
-        if let Some(function) = self.module.get_function("memcpy") {
-            return function;
-        }
-        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let size_type = self.context.i64_type();
-        // void* memcpy(void* dest, const void* src, size_t n)
-        let memcpy_type = i8_ptr_type.fn_type(
-            &[i8_ptr_type.into(), i8_ptr_type.into(), size_type.into()],
-            false,
-        );
-        self.module
-            .add_function("memcpy", memcpy_type, Some(Linkage::External))
-    }
-
-    fn add_free(&self) -> FunctionValue<'ctx> {
-        if let Some(function) = self.module.get_function("free") {
-            return function;
-        }
-        let void_type = self.context.void_type();
-        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let free_type = void_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("free", free_type, Some(Linkage::External))
-    }
-
-    fn add_strlen(&self) -> FunctionValue<'ctx> {
-        if let Some(function) = self.module.get_function("strlen") {
-            return function;
-        }
-        let size_type = self.context.i64_type();
-        let i8_ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let strlen_type = size_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("strlen", strlen_type, Some(Linkage::External))
-    }
-
-    fn get_int_format_string(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_global_string_ptr("%d\n", "int_format_string")
-            .unwrap()
-            .as_pointer_value()
-    }
-
-    fn get_float_format_string(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_global_string_ptr("%f\n", "float_format_string")
-            .unwrap()
-            .as_pointer_value()
-    }
-
-    fn get_scanf_float_format_string(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_global_string_ptr("%lf", "scanf_float_format_string")
-            .unwrap()
-            .as_pointer_value()
-    }
-
-    fn get_string_format_string(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_global_string_ptr("%s\n", "string_format_string")
-            .unwrap()
-            .as_pointer_value()
-    }
-
-    fn get_int_format_string_no_newline(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_global_string_ptr("%d", "int_format_no_nl")
-            .unwrap()
-            .as_pointer_value()
-    }
-
-    fn get_float_format_string_no_newline(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_global_string_ptr("%f", "float_format_no_nl")
-            .unwrap()
-            .as_pointer_value()
-    }
-
-    fn get_string_format_string_no_newline(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_global_string_ptr("%s", "string_format_no_nl")
-            .unwrap()
-            .as_pointer_value()
-    }
-
-    fn get_space_format_string(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_global_string_ptr(" ", "space_format")
-            .unwrap()
-            .as_pointer_value()
-    }
-
-    fn get_newline_format_string(&self) -> PointerValue<'ctx> {
-        self.builder
-            .build_global_string_ptr("\n", "newline_format")
-            .unwrap()
-            .as_pointer_value()
-    }
-
     fn build_print_value(&mut self, pyobject: IntValue<'ctx>, with_newline: bool) {
-        let printf = self.add_printf();
+        let printf = self.runtime.add_printf(&self.module);
 
         // Extract tag and payload
         let tag = self.extract_tag(pyobject);
@@ -2084,9 +1968,10 @@ impl<'ctx> Compiler<'ctx> {
             .build_float_to_signed_int(payload, self.context.i64_type(), "to_int")
             .unwrap();
         let int_format = if with_newline {
-            self.get_int_format_string()
+            self.format_strings.get_int_format_string(&self.builder)
         } else {
-            self.get_int_format_string_no_newline()
+            self.format_strings
+                .get_int_format_string_no_newline(&self.builder)
         };
         self.builder
             .build_call(printf, &[int_format.into(), int_val.into()], "printf_int")
@@ -2096,9 +1981,10 @@ impl<'ctx> Compiler<'ctx> {
         // Float block
         self.builder.position_at_end(float_block);
         let float_format = if with_newline {
-            self.get_float_format_string()
+            self.format_strings.get_float_format_string(&self.builder)
         } else {
-            self.get_float_format_string_no_newline()
+            self.format_strings
+                .get_float_format_string_no_newline(&self.builder)
         };
         self.builder
             .build_call(
@@ -2113,9 +1999,10 @@ impl<'ctx> Compiler<'ctx> {
         self.builder.position_at_end(string_block);
         let str_ptr = self.extract_string_ptr(pyobject);
         let string_format = if with_newline {
-            self.get_string_format_string()
+            self.format_strings.get_string_format_string(&self.builder)
         } else {
-            self.get_string_format_string_no_newline()
+            self.format_strings
+                .get_string_format_string_no_newline(&self.builder)
         };
         self.builder
             .build_call(
