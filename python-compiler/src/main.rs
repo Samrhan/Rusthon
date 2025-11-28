@@ -6,6 +6,7 @@ use std::process::{self, Command};
 
 mod ast;
 mod codegen;
+mod compiler;
 mod error;
 mod lowering;
 mod parser;
