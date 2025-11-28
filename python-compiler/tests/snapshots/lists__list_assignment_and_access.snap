@@ -11,20 +11,23 @@ source_filename = "main"
 ; Function Attrs: nofree nounwind
 define noundef i32 @main() local_unnamed_addr #0 {
 entry:
-  %malloc_list = tail call dereferenceable_or_null(32) ptr @malloc(i64 32)
-  store i64 9221120237041090565, ptr %malloc_list, align 4
-  %elem_ptr_1 = getelementptr inbounds i64, ptr %malloc_list, i64 1
+  %malloc_list = tail call dereferenceable_or_null(40) ptr @malloc(i64 40)
+  store i64 4, ptr %malloc_list, align 4
+  %elem_ptr_0 = getelementptr inbounds i64, ptr %malloc_list, i64 1
+  store i64 9221120237041090565, ptr %elem_ptr_0, align 4
+  %elem_ptr_1 = getelementptr inbounds i64, ptr %malloc_list, i64 2
   store i64 9221120237041090570, ptr %elem_ptr_1, align 4
-  %elem_ptr_2 = getelementptr inbounds i64, ptr %malloc_list, i64 2
+  %elem_ptr_2 = getelementptr inbounds i64, ptr %malloc_list, i64 3
   store i64 9221120237041090575, ptr %elem_ptr_2, align 4
-  %elem_ptr_3 = getelementptr inbounds i64, ptr %malloc_list, i64 3
+  %elem_ptr_3 = getelementptr inbounds i64, ptr %malloc_list, i64 4
   store i64 9221120237041090580, ptr %elem_ptr_3, align 4
   %ptr_to_int = ptrtoint ptr %malloc_list to i64
   %list_ptr_payload = and i64 %ptr_to_int, 281474976710655
   %payload_to_list_ptr = inttoptr i64 %list_ptr_payload to ptr
-  %elem = load i64, ptr %payload_to_list_ptr, align 4
-  %elem_ptr5 = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 3
-  %elem6 = load i64, ptr %elem_ptr5, align 4
+  %elem_ptr = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 1
+  %elem = load i64, ptr %elem_ptr, align 4
+  %elem_ptr8 = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 4
+  %elem9 = load i64, ptr %elem_ptr8, align 4
   %check_qnan = and i64 %elem, 9221120237041090560
   %is_float.not = icmp eq i64 %check_qnan, 9221120237041090560
   %tag_bits = lshr i64 %elem, 48
@@ -64,45 +67,45 @@ print_string:                                     ; preds = %entry
   br label %print_end
 
 print_end:                                        ; preds = %print_string, %print_float, %print_int
-  %check_qnan12 = and i64 %elem6, 9221120237041090560
-  %is_float13.not = icmp eq i64 %check_qnan12, 9221120237041090560
-  %tag_bits14 = lshr i64 %elem6, 48
-  %tag15 = and i64 %tag_bits14, 7
-  %is_bool16 = icmp eq i64 %tag15, 1
-  %is_string17 = icmp eq i64 %tag15, 2
-  %is_list18 = icmp eq i64 %tag15, 3
-  %4 = trunc i64 %tag_bits14 to i3
-  %5 = select i1 %is_bool16, i3 2, i3 %4
-  %6 = select i1 %is_string17, i3 3, i3 %5
-  %7 = select i1 %is_list18, i3 -4, i3 %6
-  %i64_to_f6425 = bitcast i64 %elem6 to double
-  %extract_payload26 = and i64 %elem6, 281474976710655
-  %is_negative28.not = icmp ult i64 %extract_payload26, 140737488355328
-  %masksel47 = select i1 %is_negative28.not, i64 0, i64 -281474976710656
-  %signed_payload30 = or disjoint i64 %masksel47, %extract_payload26
-  %payload_to_f6431 = sitofp i64 %signed_payload30 to double
-  %final_payload32 = select i1 %is_float13.not, double %payload_to_f6431, double %i64_to_f6425
-  %trunc48 = select i1 %is_float13.not, i3 %7, i3 1
-  switch i3 %trunc48, label %print_float37 [
-    i3 3, label %print_string38
-    i3 0, label %print_int36
+  %check_qnan15 = and i64 %elem9, 9221120237041090560
+  %is_float16.not = icmp eq i64 %check_qnan15, 9221120237041090560
+  %tag_bits17 = lshr i64 %elem9, 48
+  %tag18 = and i64 %tag_bits17, 7
+  %is_bool19 = icmp eq i64 %tag18, 1
+  %is_string20 = icmp eq i64 %tag18, 2
+  %is_list21 = icmp eq i64 %tag18, 3
+  %4 = trunc i64 %tag_bits17 to i3
+  %5 = select i1 %is_bool19, i3 2, i3 %4
+  %6 = select i1 %is_string20, i3 3, i3 %5
+  %7 = select i1 %is_list21, i3 -4, i3 %6
+  %i64_to_f6428 = bitcast i64 %elem9 to double
+  %extract_payload29 = and i64 %elem9, 281474976710655
+  %is_negative31.not = icmp ult i64 %extract_payload29, 140737488355328
+  %masksel50 = select i1 %is_negative31.not, i64 0, i64 -281474976710656
+  %signed_payload33 = or disjoint i64 %masksel50, %extract_payload29
+  %payload_to_f6434 = sitofp i64 %signed_payload33 to double
+  %final_payload35 = select i1 %is_float16.not, double %payload_to_f6434, double %i64_to_f6428
+  %trunc51 = select i1 %is_float16.not, i3 %7, i3 1
+  switch i3 %trunc51, label %print_float40 [
+    i3 3, label %print_string41
+    i3 0, label %print_int39
   ]
 
-print_int36:                                      ; preds = %print_end
-  %to_int40 = fptosi double %final_payload32 to i64
-  %printf_int41 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int40)
-  br label %print_end39
+print_int39:                                      ; preds = %print_end
+  %to_int43 = fptosi double %final_payload35 to i64
+  %printf_int44 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int43)
+  br label %print_end42
 
-print_float37:                                    ; preds = %print_end
-  %printf_float42 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.2, double %final_payload32)
-  br label %print_end39
+print_float40:                                    ; preds = %print_end
+  %printf_float45 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.2, double %final_payload35)
+  br label %print_end42
 
-print_string38:                                   ; preds = %print_end
-  %payload_to_ptr44 = inttoptr i64 %extract_payload26 to ptr
-  %puts49 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr44)
-  br label %print_end39
+print_string41:                                   ; preds = %print_end
+  %payload_to_ptr47 = inttoptr i64 %extract_payload29 to ptr
+  %puts52 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr47)
+  br label %print_end42
 
-print_end39:                                      ; preds = %print_string38, %print_float37, %print_int36
+print_end42:                                      ; preds = %print_string41, %print_float40, %print_int39
   ret i32 0
 }
 

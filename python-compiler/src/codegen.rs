@@ -191,10 +191,10 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Creates a PyObject value from a list pointer and length using NaN-boxing
-    /// Note: We store just the pointer in the NaN-boxed value
-    /// The length must be tracked separately (e.g., stored before the array data)
+    /// The pointer should point to a memory layout: [length: i64][element_0: i64]...[element_n: i64]
+    /// The length is stored at offset 0 in the allocation
     fn create_pyobject_list(&self, ptr: PointerValue<'ctx>, _len: usize) -> IntValue<'ctx> {
-        // For now, just store the pointer (length tracking is a TODO)
+        // Store the pointer in the NaN-boxed value
         // NaN-box: QNAN | (TAG_LIST << 48) | (ptr & PAYLOAD_MASK)
         let ptr_as_int = self
             .builder
@@ -224,7 +224,7 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Extracts a list pointer and length from a PyObject
     /// Assumes the PyObject has a LIST tag
-    /// Note: Length extraction is simplified - actual length should be stored with the array
+    /// The pointer points to: [length: i64][element_0: i64]...[element_n: i64]
     fn extract_list_ptr_and_len(
         &self,
         pyobject: IntValue<'ctx>,
@@ -246,8 +246,23 @@ impl<'ctx> Compiler<'ctx> {
             )
             .unwrap();
 
-        // For length, we return 0 for now (TODO: store length with array data)
-        let len = self.context.i64_type().const_int(0, false);
+        // Read the length from offset 0
+        let pyobject_type = self.create_pyobject_type();
+        let len_ptr = unsafe {
+            self.builder
+                .build_in_bounds_gep(
+                    pyobject_type,
+                    ptr,
+                    &[self.context.i64_type().const_int(0, false)],
+                    "len_ptr",
+                )
+                .unwrap()
+        };
+        let len = self
+            .builder
+            .build_load(pyobject_type, len_ptr, "list_len")
+            .unwrap()
+            .into_int_value();
 
         (ptr, len)
     }
@@ -1444,11 +1459,16 @@ impl<'ctx> Compiler<'ctx> {
                 let arg_obj = self.compile_expression(arg)?;
                 let arg_tag = self.extract_tag(arg_obj);
 
-                // Check if the argument is a string
+                // Check if the argument is a string or list
                 let string_tag_const = self
                     .context
                     .i64_type()
                     .const_int(TYPE_TAG_STRING as u64, false);
+                let list_tag_const = self
+                    .context
+                    .i64_type()
+                    .const_int(TYPE_TAG_LIST as u64, false);
+
                 let is_string = self
                     .builder
                     .build_int_compare(
@@ -1456,6 +1476,15 @@ impl<'ctx> Compiler<'ctx> {
                         arg_tag,
                         string_tag_const,
                         "is_string",
+                    )
+                    .unwrap();
+                let is_list = self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::EQ,
+                        arg_tag,
+                        list_tag_const,
+                        "is_list",
                     )
                     .unwrap();
 
@@ -1468,12 +1497,20 @@ impl<'ctx> Compiler<'ctx> {
                     .unwrap();
 
                 let string_len_block = self.context.append_basic_block(current_fn, "string_len");
+                let list_len_block = self.context.append_basic_block(current_fn, "list_len");
                 let other_len_block = self.context.append_basic_block(current_fn, "other_len");
                 let merge_block = self.context.append_basic_block(current_fn, "len_merge");
 
-                // Branch based on type
+                // Branch: is_string ? string_len : check_list
+                let check_list_block = self.context.append_basic_block(current_fn, "check_list");
                 self.builder
-                    .build_conditional_branch(is_string, string_len_block, other_len_block)
+                    .build_conditional_branch(is_string, string_len_block, check_list_block)
+                    .unwrap();
+
+                // Check if it's a list
+                self.builder.position_at_end(check_list_block);
+                self.builder
+                    .build_conditional_branch(is_list, list_len_block, other_len_block)
                     .unwrap();
 
                 // String length block
@@ -1497,7 +1534,15 @@ impl<'ctx> Compiler<'ctx> {
                     .build_unconditional_branch(merge_block)
                     .unwrap();
 
-                // Other types - return 0 for now (could be extended for lists, etc.)
+                // List length block
+                self.builder.position_at_end(list_len_block);
+                let (_list_ptr, list_len) = self.extract_list_ptr_and_len(arg_obj);
+                let list_len_result = self.create_pyobject_int(list_len);
+                self.builder
+                    .build_unconditional_branch(merge_block)
+                    .unwrap();
+
+                // Other types - return 0 for now
                 self.builder.position_at_end(other_len_block);
                 let zero_int = self.context.i64_type().const_int(0, false);
                 let other_len_result = self.create_pyobject_int(zero_int);
@@ -1511,6 +1556,7 @@ impl<'ctx> Compiler<'ctx> {
                 let phi = self.builder.build_phi(pyobject_type, "len_result").unwrap();
                 phi.add_incoming(&[
                     (&string_len_result, string_len_block),
+                    (&list_len_result, list_len_block),
                     (&other_len_result, other_len_block),
                 ]);
                 Ok(phi.as_basic_value().into_int_value())
@@ -1652,10 +1698,13 @@ impl<'ctx> Compiler<'ctx> {
                 let list_len = elements.len();
                 let pyobject_type = self.create_pyobject_type();
 
-                // Allocate memory for the array of PyObjects
-                // size = list_len * sizeof(PyObject)
+                // Allocate memory for: [length: i64][element_0: i64]...[element_n: i64]
+                // Total size = (1 + list_len) * sizeof(i64)
                 let pyobject_size = pyobject_type.size_of();
-                let element_count = self.context.i64_type().const_int(list_len as u64, false);
+                let element_count = self
+                    .context
+                    .i64_type()
+                    .const_int((list_len + 1) as u64, false); // +1 for length header
                 let total_size = self
                     .builder
                     .build_int_mul(pyobject_size, element_count, "list_size")
@@ -1676,9 +1725,23 @@ impl<'ctx> Compiler<'ctx> {
                     }
                 };
 
-                // Store each element in the array
+                // Store the length at offset 0
+                let len_value = self.context.i64_type().const_int(list_len as u64, false);
+                let len_ptr = unsafe {
+                    self.builder
+                        .build_in_bounds_gep(
+                            pyobject_type,
+                            list_ptr,
+                            &[self.context.i64_type().const_int(0, false)],
+                            "len_ptr",
+                        )
+                        .unwrap()
+                };
+                self.builder.build_store(len_ptr, len_value).unwrap();
+
+                // Store each element in the array (starting at offset 1)
                 for (i, elem_pyobj) in compiled_elements.iter().enumerate() {
-                    let index = self.context.i64_type().const_int(i as u64, false);
+                    let index = self.context.i64_type().const_int((i + 1) as u64, false); // +1 to skip length header
                     let elem_ptr = unsafe {
                         self.builder
                             .build_in_bounds_gep(
@@ -1709,11 +1772,22 @@ impl<'ctx> Compiler<'ctx> {
                     .build_float_to_signed_int(index_payload, self.context.i64_type(), "index_int")
                     .unwrap();
 
-                // Get the element at the index
+                // Add 1 to the index to skip the length header
+                // List layout: [length: i64][element_0: i64]...[element_n: i64]
+                let adjusted_index = self
+                    .builder
+                    .build_int_add(
+                        index_int,
+                        self.context.i64_type().const_int(1, false),
+                        "adjusted_index",
+                    )
+                    .unwrap();
+
+                // Get the element at the adjusted index
                 let pyobject_type = self.create_pyobject_type();
                 let elem_ptr = unsafe {
                     self.builder
-                        .build_in_bounds_gep(pyobject_type, list_ptr, &[index_int], "elem_ptr")
+                        .build_in_bounds_gep(pyobject_type, list_ptr, &[adjusted_index], "elem_ptr")
                         .unwrap()
                 };
 

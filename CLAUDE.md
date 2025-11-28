@@ -95,6 +95,33 @@ const TAG_MASK: u64 = 0x0007_0000_0000_0000;
 const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
 ```
 
+### List Memory Layout
+
+Lists are heap-allocated with a **length header** for O(1) `len()` operations:
+
+```text
+Memory Layout: [length: i64][element_0: i64][element_1: i64]...[element_n: i64]
+
+Example - 3-element list [10, 20, 30]:
+Offset:  0         1           2           3
+Value:   3         10          20          30
+         ^length   ^elem[0]    ^elem[1]    ^elem[2]
+```
+
+**Implementation Details**:
+- **Allocation**: `malloc((n + 1) * sizeof(i64))` where n = number of elements
+- **Length storage**: Offset 0 contains the list length as i64
+- **Element storage**: Elements start at offset 1
+- **Indexing**: `list[i]` accesses offset `i + 1` to skip the length header
+- **len() operation**: Reads i64 at offset 0 (O(1) time)
+- **Memory overhead**: +8 bytes per list (1 i64 header)
+
+**Code locations**:
+- List allocation: `codegen.rs:1644-1713` (`IRExpr::List`)
+- Length extraction: `codegen.rs:225-268` (`extract_list_ptr_and_len`)
+- List indexing: `codegen.rs:1730-1776` (`IRExpr::Index`)
+- len() for lists: `codegen.rs:1458-1557` (`IRExpr::Len`)
+
 ---
 
 ## File Structure
@@ -812,5 +839,6 @@ git push -u origin claude/branch-name-sessionId
 ---
 
 **Last Updated**: 2025-11-28
-**Version**: 1.0
-**Branch**: `claude/fix-llvm-passes-tests-01JGn88ZtXDeuXcN5gjLzmUv`
+**Version**: 1.1
+**Branch**: `claude/implement-list-allocation-011WAnqDHpZqBFVuMe8Rfe9e`
+**Recent Changes**: Added list allocation with length header implementation

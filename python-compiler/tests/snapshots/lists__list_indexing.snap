@@ -11,16 +11,19 @@ source_filename = "main"
 ; Function Attrs: nofree nounwind
 define noundef i32 @main() local_unnamed_addr #0 {
 entry:
-  %malloc_list = tail call dereferenceable_or_null(24) ptr @malloc(i64 24)
-  store i64 9221120237041090570, ptr %malloc_list, align 4
-  %elem_ptr_1 = getelementptr inbounds i64, ptr %malloc_list, i64 1
+  %malloc_list = tail call dereferenceable_or_null(32) ptr @malloc(i64 32)
+  store i64 3, ptr %malloc_list, align 4
+  %elem_ptr_0 = getelementptr inbounds i64, ptr %malloc_list, i64 1
+  store i64 9221120237041090570, ptr %elem_ptr_0, align 4
+  %elem_ptr_1 = getelementptr inbounds i64, ptr %malloc_list, i64 2
   store i64 9221120237041090580, ptr %elem_ptr_1, align 4
-  %elem_ptr_2 = getelementptr inbounds i64, ptr %malloc_list, i64 2
+  %elem_ptr_2 = getelementptr inbounds i64, ptr %malloc_list, i64 3
   store i64 9221120237041090590, ptr %elem_ptr_2, align 4
   %ptr_to_int = ptrtoint ptr %malloc_list to i64
   %list_ptr_payload = and i64 %ptr_to_int, 281474976710655
   %payload_to_list_ptr = inttoptr i64 %list_ptr_payload to ptr
-  %elem = load i64, ptr %payload_to_list_ptr, align 4
+  %elem_ptr = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 1
+  %elem = load i64, ptr %elem_ptr, align 4
   %check_qnan = and i64 %elem, 9221120237041090560
   %is_float.not = icmp eq i64 %check_qnan, 9221120237041090560
   %tag_bits = lshr i64 %elem, 48
@@ -60,88 +63,88 @@ print_string:                                     ; preds = %entry
   br label %print_end
 
 print_end:                                        ; preds = %print_string, %print_float, %print_int
-  %elem_ptr8 = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 1
-  %elem9 = load i64, ptr %elem_ptr8, align 4
-  %check_qnan10 = and i64 %elem9, 9221120237041090560
-  %is_float11.not = icmp eq i64 %check_qnan10, 9221120237041090560
-  %tag_bits12 = lshr i64 %elem9, 48
-  %tag13 = and i64 %tag_bits12, 7
-  %is_bool14 = icmp eq i64 %tag13, 1
-  %is_string15 = icmp eq i64 %tag13, 2
-  %is_list16 = icmp eq i64 %tag13, 3
-  %4 = trunc i64 %tag_bits12 to i3
-  %5 = select i1 %is_bool14, i3 2, i3 %4
-  %6 = select i1 %is_string15, i3 3, i3 %5
-  %7 = select i1 %is_list16, i3 -4, i3 %6
-  %i64_to_f6423 = bitcast i64 %elem9 to double
-  %extract_payload24 = and i64 %elem9, 281474976710655
-  %is_negative26.not = icmp ult i64 %extract_payload24, 140737488355328
-  %masksel85 = select i1 %is_negative26.not, i64 0, i64 -281474976710656
-  %signed_payload28 = or disjoint i64 %masksel85, %extract_payload24
-  %payload_to_f6429 = sitofp i64 %signed_payload28 to double
-  %final_payload30 = select i1 %is_float11.not, double %payload_to_f6429, double %i64_to_f6423
-  %trunc86 = select i1 %is_float11.not, i3 %7, i3 1
-  switch i3 %trunc86, label %print_float35 [
-    i3 3, label %print_string36
-    i3 0, label %print_int34
+  %elem_ptr11 = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 2
+  %elem12 = load i64, ptr %elem_ptr11, align 4
+  %check_qnan13 = and i64 %elem12, 9221120237041090560
+  %is_float14.not = icmp eq i64 %check_qnan13, 9221120237041090560
+  %tag_bits15 = lshr i64 %elem12, 48
+  %tag16 = and i64 %tag_bits15, 7
+  %is_bool17 = icmp eq i64 %tag16, 1
+  %is_string18 = icmp eq i64 %tag16, 2
+  %is_list19 = icmp eq i64 %tag16, 3
+  %4 = trunc i64 %tag_bits15 to i3
+  %5 = select i1 %is_bool17, i3 2, i3 %4
+  %6 = select i1 %is_string18, i3 3, i3 %5
+  %7 = select i1 %is_list19, i3 -4, i3 %6
+  %i64_to_f6426 = bitcast i64 %elem12 to double
+  %extract_payload27 = and i64 %elem12, 281474976710655
+  %is_negative29.not = icmp ult i64 %extract_payload27, 140737488355328
+  %masksel90 = select i1 %is_negative29.not, i64 0, i64 -281474976710656
+  %signed_payload31 = or disjoint i64 %masksel90, %extract_payload27
+  %payload_to_f6432 = sitofp i64 %signed_payload31 to double
+  %final_payload33 = select i1 %is_float14.not, double %payload_to_f6432, double %i64_to_f6426
+  %trunc91 = select i1 %is_float14.not, i3 %7, i3 1
+  switch i3 %trunc91, label %print_float38 [
+    i3 3, label %print_string39
+    i3 0, label %print_int37
   ]
 
-print_int34:                                      ; preds = %print_end
-  %to_int38 = fptosi double %final_payload30 to i64
-  %printf_int39 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.4, i64 %to_int38)
-  br label %print_end37
+print_int37:                                      ; preds = %print_end
+  %to_int41 = fptosi double %final_payload33 to i64
+  %printf_int42 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.4, i64 %to_int41)
+  br label %print_end40
 
-print_float35:                                    ; preds = %print_end
-  %printf_float40 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.5, double %final_payload30)
-  br label %print_end37
+print_float38:                                    ; preds = %print_end
+  %printf_float43 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.5, double %final_payload33)
+  br label %print_end40
 
-print_string36:                                   ; preds = %print_end
-  %payload_to_ptr42 = inttoptr i64 %extract_payload24 to ptr
-  %puts87 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr42)
-  br label %print_end37
+print_string39:                                   ; preds = %print_end
+  %payload_to_ptr45 = inttoptr i64 %extract_payload27 to ptr
+  %puts92 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr45)
+  br label %print_end40
 
-print_end37:                                      ; preds = %print_string36, %print_float35, %print_int34
-  %elem_ptr47 = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 2
-  %elem48 = load i64, ptr %elem_ptr47, align 4
-  %check_qnan49 = and i64 %elem48, 9221120237041090560
-  %is_float50.not = icmp eq i64 %check_qnan49, 9221120237041090560
-  %tag_bits51 = lshr i64 %elem48, 48
-  %tag52 = and i64 %tag_bits51, 7
-  %is_bool53 = icmp eq i64 %tag52, 1
-  %is_string54 = icmp eq i64 %tag52, 2
-  %is_list55 = icmp eq i64 %tag52, 3
-  %8 = trunc i64 %tag_bits51 to i3
-  %9 = select i1 %is_bool53, i3 2, i3 %8
-  %10 = select i1 %is_string54, i3 3, i3 %9
-  %11 = select i1 %is_list55, i3 -4, i3 %10
-  %i64_to_f6462 = bitcast i64 %elem48 to double
-  %extract_payload63 = and i64 %elem48, 281474976710655
-  %is_negative65.not = icmp ult i64 %extract_payload63, 140737488355328
-  %masksel88 = select i1 %is_negative65.not, i64 0, i64 -281474976710656
-  %signed_payload67 = or disjoint i64 %masksel88, %extract_payload63
-  %payload_to_f6468 = sitofp i64 %signed_payload67 to double
-  %final_payload69 = select i1 %is_float50.not, double %payload_to_f6468, double %i64_to_f6462
-  %trunc89 = select i1 %is_float50.not, i3 %11, i3 1
-  switch i3 %trunc89, label %print_float74 [
-    i3 3, label %print_string75
-    i3 0, label %print_int73
+print_end40:                                      ; preds = %print_string39, %print_float38, %print_int37
+  %elem_ptr52 = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 3
+  %elem53 = load i64, ptr %elem_ptr52, align 4
+  %check_qnan54 = and i64 %elem53, 9221120237041090560
+  %is_float55.not = icmp eq i64 %check_qnan54, 9221120237041090560
+  %tag_bits56 = lshr i64 %elem53, 48
+  %tag57 = and i64 %tag_bits56, 7
+  %is_bool58 = icmp eq i64 %tag57, 1
+  %is_string59 = icmp eq i64 %tag57, 2
+  %is_list60 = icmp eq i64 %tag57, 3
+  %8 = trunc i64 %tag_bits56 to i3
+  %9 = select i1 %is_bool58, i3 2, i3 %8
+  %10 = select i1 %is_string59, i3 3, i3 %9
+  %11 = select i1 %is_list60, i3 -4, i3 %10
+  %i64_to_f6467 = bitcast i64 %elem53 to double
+  %extract_payload68 = and i64 %elem53, 281474976710655
+  %is_negative70.not = icmp ult i64 %extract_payload68, 140737488355328
+  %masksel93 = select i1 %is_negative70.not, i64 0, i64 -281474976710656
+  %signed_payload72 = or disjoint i64 %masksel93, %extract_payload68
+  %payload_to_f6473 = sitofp i64 %signed_payload72 to double
+  %final_payload74 = select i1 %is_float55.not, double %payload_to_f6473, double %i64_to_f6467
+  %trunc94 = select i1 %is_float55.not, i3 %11, i3 1
+  switch i3 %trunc94, label %print_float79 [
+    i3 3, label %print_string80
+    i3 0, label %print_int78
   ]
 
-print_int73:                                      ; preds = %print_end37
-  %to_int77 = fptosi double %final_payload69 to i64
-  %printf_int78 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.4, i64 %to_int77)
-  br label %print_end76
+print_int78:                                      ; preds = %print_end40
+  %to_int82 = fptosi double %final_payload74 to i64
+  %printf_int83 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.4, i64 %to_int82)
+  br label %print_end81
 
-print_float74:                                    ; preds = %print_end37
-  %printf_float79 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.5, double %final_payload69)
-  br label %print_end76
+print_float79:                                    ; preds = %print_end40
+  %printf_float84 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.5, double %final_payload74)
+  br label %print_end81
 
-print_string75:                                   ; preds = %print_end37
-  %payload_to_ptr81 = inttoptr i64 %extract_payload63 to ptr
-  %puts90 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr81)
-  br label %print_end76
+print_string80:                                   ; preds = %print_end40
+  %payload_to_ptr86 = inttoptr i64 %extract_payload68 to ptr
+  %puts95 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr86)
+  br label %print_end81
 
-print_end76:                                      ; preds = %print_string75, %print_float74, %print_int73
+print_end81:                                      ; preds = %print_string80, %print_float79, %print_int78
   ret i32 0
 }
 
