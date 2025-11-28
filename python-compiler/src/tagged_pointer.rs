@@ -5,13 +5,13 @@
 /// ## Memory Layout (64-bit value)
 ///
 /// ### For actual floating-point numbers:
-/// ```
+/// ```text
 /// [  sign  ][  exponent  ][        mantissa        ]
 /// [ 1 bit  ][ 11 bits    ][     52 bits            ]
 /// ```
 ///
 /// ### For tagged values (using quiet NaN encoding):
-/// ```
+/// ```text
 /// [1][11111111111][1][ tag (3 bits) ][ payload (48 bits) ]
 ///  ^      ^         ^       ^                 ^
 ///  |      |         |       |                 |

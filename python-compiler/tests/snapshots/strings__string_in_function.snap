@@ -1,0 +1,45 @@
+---
+source: tests/strings.rs
+expression: llvm_ir
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@str_literal = private unnamed_addr constant [20 x i8] c"Hello from function\00", align 1
+
+; Function Attrs: nofree nounwind
+define noundef i64 @greet() local_unnamed_addr #0 {
+entry:
+  %malloc_str = tail call dereferenceable_or_null(20) ptr @malloc(i64 20)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(20) %malloc_str, ptr noundef nonnull align 1 dereferenceable(20) @str_literal, i64 20, i1 false)
+  %ptr_to_int = ptrtoint ptr %malloc_str to i64
+  %ptr_payload = and i64 %ptr_to_int, 281474976710655
+  %payload_to_ptr = inttoptr i64 %ptr_payload to ptr
+  %puts = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr)
+  ret i64 9221120237041090560
+}
+
+; Function Attrs: mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite)
+declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #1
+
+; Function Attrs: nofree nounwind
+define noundef i32 @main() local_unnamed_addr #0 {
+entry:
+  %malloc_str.i = tail call dereferenceable_or_null(20) ptr @malloc(i64 20)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(20) %malloc_str.i, ptr noundef nonnull align 1 dereferenceable(20) @str_literal, i64 20, i1 false)
+  %ptr_to_int.i = ptrtoint ptr %malloc_str.i to i64
+  %ptr_payload.i = and i64 %ptr_to_int.i, 281474976710655
+  %payload_to_ptr.i = inttoptr i64 %ptr_payload.i to ptr
+  %puts.i = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr.i)
+  ret i32 0
+}
+
+; Function Attrs: nocallback nofree nounwind willreturn memory(argmem: readwrite)
+declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg) #2
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @puts(ptr nocapture noundef readonly) local_unnamed_addr #0
+
+attributes #0 = { nofree nounwind }
+attributes #1 = { mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite) "alloc-family"="malloc" }
+attributes #2 = { nocallback nofree nounwind willreturn memory(argmem: readwrite) }

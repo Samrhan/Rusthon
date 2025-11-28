@@ -268,11 +268,12 @@ with open("file.txt") as f:
 
 ❌ **Large Integers**
 ```python
-# Integers stored as doubles (±2^53)
-big = 9007199254740993  # May lose precision
-print(big)              # Might print wrong value
+# Integers use NaN-boxing with 48-bit payload (±2^47)
+# Range: ±140,737,488,355,328 (approximately ±140 trillion)
+big = 140737488355329  # Exceeds 48-bit range, will overflow
+print(big)             # Incorrect value
 
-# Workaround: Use floats or stay within ±2^53
+# Workaround: Stay within ±140 trillion or use floats for larger values
 ```
 
 ### Arbitrary Precision

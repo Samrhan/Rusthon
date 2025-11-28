@@ -2,11 +2,16 @@ use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt, UnaryOp};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::passes::PassManager;
+use inkwell::passes::PassBuilderOptions;
+use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine};
 use inkwell::values::{FloatValue, FunctionValue, IntValue, PointerValue};
 use inkwell::FloatPredicate;
+use inkwell::OptimizationLevel;
 use std::collections::HashMap;
+use std::sync::Once;
 use thiserror::Error;
+
+static INIT_TARGETS: Once = Once::new();
 
 // NaN-boxing constants for tagged pointers
 // PyObject is now represented as a single i64 using NaN-boxing
@@ -48,7 +53,10 @@ pub struct Compiler<'ctx> {
         inkwell::basic_block::BasicBlock<'ctx>,
     )>,
     // Arena for string allocations - stores pointers to allocated strings for cleanup
+    // Only strings allocated in the main entry block are tracked to avoid dominance issues
     string_arena: Vec<PointerValue<'ctx>>,
+    // The entry block of the main function (used to check if strings can be safely tracked)
+    main_entry_block: Option<inkwell::basic_block::BasicBlock<'ctx>>,
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -64,6 +72,7 @@ impl<'ctx> Compiler<'ctx> {
             function_defaults: HashMap::new(),
             loop_stack: Vec::new(),
             string_arena: Vec::new(),
+            main_entry_block: None,
         }
     }
 
@@ -548,14 +557,62 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap()
     }
 
-    /// Creates and configures an LLVM optimization pass manager
-    /// Note: LLVM 18 deprecated the old pass manager API used here.
-    /// TODO: Migrate to new pass manager API when inkwell provides bindings.
-    /// For now, optimizations are disabled.
-    fn create_optimization_passes(&self) -> PassManager<FunctionValue<'ctx>> {
-        let fpm = PassManager::create(&self.module);
-        fpm.initialize();
-        fpm
+    /// Initializes LLVM targets (only once per program execution)
+    fn init_targets() {
+        INIT_TARGETS.call_once(|| {
+            Target::initialize_all(&InitializationConfig::default());
+        });
+    }
+
+    /// Runs LLVM optimization passes using the new pass manager (LLVM 18+)
+    /// Uses a moderate optimization pipeline (O2) for good performance without excessive compile time
+    fn run_optimization_passes(&self) -> Result<(), CodeGenError> {
+        // Initialize targets (required for run_passes)
+        Self::init_targets();
+
+        // Create target machine
+        let triple = TargetMachine::get_default_triple();
+        let target = Target::from_triple(&triple).map_err(|e| {
+            CodeGenError::ModuleVerification(format!("Failed to get target: {}", e))
+        })?;
+
+        let machine = target
+            .create_target_machine(
+                &triple,
+                "generic",
+                "",
+                OptimizationLevel::Default,
+                RelocMode::Default,
+                CodeModel::Default,
+            )
+            .ok_or_else(|| {
+                CodeGenError::ModuleVerification("Failed to create target machine".to_string())
+            })?;
+
+        // Configure pass builder options
+        let pass_options = PassBuilderOptions::create();
+        pass_options.set_verify_each(true);
+        pass_options.set_loop_vectorization(true);
+        pass_options.set_loop_slp_vectorization(true);
+        pass_options.set_loop_unrolling(true);
+        pass_options.set_merge_functions(true);
+
+        // Run the optimization pipeline
+        // "default<O2>" runs the default optimization pipeline at O2 level
+        // This includes common optimizations like:
+        // - Instruction combining
+        // - Dead code elimination
+        // - GVN (global value numbering)
+        // - Memory to register promotion
+        // - Loop optimizations
+        // - Inlining
+        self.module
+            .run_passes("default<O2>", &machine, pass_options)
+            .map_err(|e| {
+                CodeGenError::ModuleVerification(format!("Optimization passes failed: {}", e))
+            })?;
+
+        Ok(())
     }
 
     pub fn compile_program(mut self, program: &[IRStmt]) -> Result<String, CodeGenError> {
@@ -564,16 +621,28 @@ impl<'ctx> Compiler<'ctx> {
             .iter()
             .partition(|stmt| matches!(stmt, IRStmt::FunctionDef { .. }));
 
-        // Compile all function definitions first
-        for func_stmt in functions {
+        // Two-pass compilation for mutual recursion support:
+
+        // Pass 1: Declare all function signatures
+        for func_stmt in &functions {
             if let IRStmt::FunctionDef {
                 name,
                 params,
                 defaults,
-                body,
+                ..
             } = func_stmt
             {
-                self.compile_function_def(name, params, defaults, body)?;
+                self.declare_function(name, params, defaults);
+            }
+        }
+
+        // Pass 2: Compile all function bodies
+        for func_stmt in &functions {
+            if let IRStmt::FunctionDef {
+                name, params, body, ..
+            } = func_stmt
+            {
+                self.compile_function_body(name, params, body)?;
             }
         }
 
@@ -584,22 +653,23 @@ impl<'ctx> Compiler<'ctx> {
         let entry = self.context.append_basic_block(main_fn, "entry");
         self.builder.position_at_end(entry);
 
+        // Store the main entry block to track which strings can be safely freed
+        self.main_entry_block = Some(entry);
+
         for stmt in top_level {
             self.compile_statement(stmt, main_fn)?;
         }
 
-        // TODO: Fix string cleanup - currently disabled due to LLVM dominance issues
-        // String pointers allocated in conditional branches don't dominate the cleanup code
-        // This causes LLVM verification errors. Proper fix would be to use RAII or track
-        // which strings can be safely freed in the main block.
-        // For now, this is a known memory leak in generated programs.
-        //
-        // let free_fn = self.add_free();
-        // for str_ptr in &self.string_arena {
-        //     self.builder
-        //         .build_call(free_fn, &[(*str_ptr).into()], "free_str")
-        //         .unwrap();
-        // }
+        // String cleanup: Free all allocated strings
+        // Note: We accept that strings allocated in functions may leak, as we only
+        // track strings allocated in main. A full solution would require reference
+        // counting or garbage collection, which is beyond the scope of this compiler.
+        let free_fn = self.add_free();
+        for str_ptr in &self.string_arena {
+            self.builder
+                .build_call(free_fn, &[(*str_ptr).into()], "free_str")
+                .unwrap();
+        }
 
         self.builder
             .build_return(Some(&i32_type.const_int(0, false)))
@@ -611,16 +681,9 @@ impl<'ctx> Compiler<'ctx> {
             ));
         }
 
-        // Run optimization passes on all functions
-        let fpm = self.create_optimization_passes();
-
-        // Optimize all user-defined functions
-        for function in self.functions.values() {
-            fpm.run_on(function);
-        }
-
-        // Optimize main function
-        fpm.run_on(&main_fn);
+        // Run optimization passes using the new pass manager (LLVM 18+)
+        // This optimizes all functions in the module at once
+        self.run_optimization_passes()?;
 
         Ok(self.module.print_to_string().to_string())
     }
@@ -674,6 +737,11 @@ impl<'ctx> Compiler<'ctx> {
                     ptr
                 });
                 self.builder.build_store(ptr, value).unwrap();
+            }
+            IRStmt::ExprStmt(expr) => {
+                // Evaluate the expression and discard the result
+                // This is used for function calls that are executed for their side effects
+                self.compile_expression(expr)?;
             }
             IRStmt::Return(expr) => {
                 let value = self.compile_expression(expr)?;
@@ -1069,8 +1137,13 @@ impl<'ctx> Compiler<'ctx> {
                         )
                         .unwrap();
 
-                    // Track the allocated string in the arena
-                    self.string_arena.push(concat_ptr);
+                    // Track the allocated string in the arena only if in main entry block
+                    // This avoids dominance issues with strings allocated in conditional branches
+                    if let Some(main_entry) = self.main_entry_block {
+                        if self.builder.get_insert_block() == Some(main_entry) {
+                            self.string_arena.push(concat_ptr);
+                        }
+                    }
 
                     // Create PyObject for concatenated string
                     let concat_result = self.create_pyobject_string(concat_ptr);
@@ -1212,7 +1285,7 @@ impl<'ctx> Compiler<'ctx> {
                         // Check if either operand is a float (tag == TYPE_TAG_FLOAT)
                         let float_tag_const = self
                             .context
-                            .i8_type()
+                            .i64_type()
                             .const_int(TYPE_TAG_FLOAT as u64, false);
                         let lhs_is_float = self
                             .builder
@@ -1511,8 +1584,13 @@ impl<'ctx> Compiler<'ctx> {
                     )
                     .unwrap();
 
-                // Track the allocated string in the arena for cleanup
-                self.string_arena.push(str_ptr);
+                // Track the allocated string in the arena for cleanup only if in main entry block
+                // This avoids dominance issues with strings allocated in conditional branches
+                if let Some(main_entry) = self.main_entry_block {
+                    if self.builder.get_insert_block() == Some(main_entry) {
+                        self.string_arena.push(str_ptr);
+                    }
+                }
 
                 // Wrap the string pointer in a PyObject
                 Ok(self.create_pyobject_string(str_ptr))
@@ -1651,13 +1729,14 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn compile_function_def(
+    /// Declares a function signature without compiling the body.
+    /// This is the first pass for supporting mutual recursion.
+    fn declare_function(
         &mut self,
         name: &str,
         params: &[String],
         defaults: &[Option<IRExpr>],
-        body: &[IRStmt],
-    ) -> Result<(), CodeGenError> {
+    ) -> FunctionValue<'ctx> {
         let pyobject_type = self.create_pyobject_type();
 
         // Create function signature: all params are PyObject, return type is PyObject
@@ -1670,11 +1749,27 @@ impl<'ctx> Compiler<'ctx> {
         self.function_defaults
             .insert(name.to_string(), defaults.to_vec());
 
+        function
+    }
+
+    /// Compiles the body of a previously declared function.
+    /// This is the second pass for supporting mutual recursion.
+    fn compile_function_body(
+        &mut self,
+        name: &str,
+        params: &[String],
+        body: &[IRStmt],
+    ) -> Result<(), CodeGenError> {
+        let function = *self
+            .functions
+            .get(name)
+            .ok_or_else(|| CodeGenError::UndefinedVariable(format!("function '{}'", name)))?;
+
         // Create entry block
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
-        // Save current variable scope (for nested functions, though we don't support them yet)
+        // Save current variable scope
         let saved_variables = self.variables.clone();
         self.variables.clear();
 

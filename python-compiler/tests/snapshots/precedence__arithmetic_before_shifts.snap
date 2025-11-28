@@ -6,153 +6,15 @@ expression: llvm_ir
 source_filename = "main"
 
 @int_format_string = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
-@float_format_string = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
-@string_format_string = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
 
-define i32 @main() {
+; Function Attrs: nofree nounwind
+define noundef i32 @main() local_unnamed_addr #0 {
 entry:
-  br i1 false, label %str_concat, label %arithmetic
-
-str_concat:                                       ; preds = %entry
-  %lhs_len = call i64 @strlen(ptr inttoptr (i64 2 to ptr))
-  %rhs_len = call i64 @strlen(ptr inttoptr (i64 3 to ptr))
-  %total_len = add i64 %lhs_len, %rhs_len
-  %total_size = add i64 %total_len, 1
-  %malloc_concat = call ptr @malloc(i64 %total_size)
-  %memcpy_lhs = call ptr @memcpy(ptr %malloc_concat, ptr inttoptr (i64 2 to ptr), i64 %lhs_len)
-  %rhs_dest = getelementptr i8, ptr %malloc_concat, i64 %lhs_len
-  %rhs_copy_len = add i64 %rhs_len, 1
-  %memcpy_rhs = call ptr @memcpy(ptr %rhs_dest, ptr inttoptr (i64 3 to ptr), i64 %rhs_copy_len)
-  %ptr_to_int = ptrtoint ptr %malloc_concat to i64
-  %ptr_payload = and i64 %ptr_to_int, 281474976710655
-  %pyobject_string = or i64 9221683186994511872, %ptr_payload
-  br label %add_merge
-
-arithmetic:                                       ; preds = %entry
-  br label %add_merge
-
-add_merge:                                        ; preds = %arithmetic, %str_concat
-  %add_result = phi i64 [ %pyobject_string, %str_concat ], [ 9221120237041090565, %arithmetic ]
-  br i1 false, label %str_concat1, label %arithmetic2
-
-str_concat1:                                      ; preds = %add_merge
-  %lhs_len4 = call i64 @strlen(ptr inttoptr (i64 1 to ptr))
-  %rhs_len5 = call i64 @strlen(ptr inttoptr (i64 1 to ptr))
-  %total_len6 = add i64 %lhs_len4, %rhs_len5
-  %total_size7 = add i64 %total_len6, 1
-  %malloc_concat8 = call ptr @malloc(i64 %total_size7)
-  %memcpy_lhs9 = call ptr @memcpy(ptr %malloc_concat8, ptr inttoptr (i64 1 to ptr), i64 %lhs_len4)
-  %rhs_dest10 = getelementptr i8, ptr %malloc_concat8, i64 %lhs_len4
-  %rhs_copy_len11 = add i64 %rhs_len5, 1
-  %memcpy_rhs12 = call ptr @memcpy(ptr %rhs_dest10, ptr inttoptr (i64 1 to ptr), i64 %rhs_copy_len11)
-  %ptr_to_int13 = ptrtoint ptr %malloc_concat8 to i64
-  %ptr_payload14 = and i64 %ptr_to_int13, 281474976710655
-  %pyobject_string15 = or i64 9221683186994511872, %ptr_payload14
-  br label %add_merge3
-
-arithmetic2:                                      ; preds = %add_merge
-  br label %add_merge3
-
-add_merge3:                                       ; preds = %arithmetic2, %str_concat1
-  %add_result16 = phi i64 [ %pyobject_string15, %str_concat1 ], [ 9221120237041090562, %arithmetic2 ]
-  %check_qnan = and i64 %add_result, 9221120237041090560
-  %is_float = icmp ne i64 %check_qnan, 9221120237041090560
-  %tag_bits = and i64 %add_result, 1970324836974592
-  %tag = lshr i64 %tag_bits, 48
-  %is_bool = icmp eq i64 %tag, 1
-  %is_string = icmp eq i64 %tag, 2
-  %is_list = icmp eq i64 %tag, 3
-  %map_bool = select i1 %is_bool, i64 2, i64 %tag
-  %map_string = select i1 %is_string, i64 3, i64 %map_bool
-  %map_list = select i1 %is_list, i64 4, i64 %map_string
-  %final_tag = select i1 %is_float, i64 1, i64 %map_list
-  %check_qnan17 = and i64 %add_result16, 9221120237041090560
-  %is_float18 = icmp ne i64 %check_qnan17, 9221120237041090560
-  %tag_bits19 = and i64 %add_result16, 1970324836974592
-  %tag20 = lshr i64 %tag_bits19, 48
-  %is_bool21 = icmp eq i64 %tag20, 1
-  %is_string22 = icmp eq i64 %tag20, 2
-  %is_list23 = icmp eq i64 %tag20, 3
-  %map_bool24 = select i1 %is_bool21, i64 2, i64 %tag20
-  %map_string25 = select i1 %is_string22, i64 3, i64 %map_bool24
-  %map_list26 = select i1 %is_list23, i64 4, i64 %map_string25
-  %final_tag27 = select i1 %is_float18, i64 1, i64 %map_list26
-  %check_qnan28 = and i64 %add_result, 9221120237041090560
-  %is_float29 = icmp ne i64 %check_qnan28, 9221120237041090560
-  %i64_to_f64 = bitcast i64 %add_result to double
-  %extract_payload = and i64 %add_result, 281474976710655
-  %sign_bit = lshr i64 %extract_payload, 47
-  %is_negative = icmp eq i64 %sign_bit, 1
-  %sign_extend = or i64 %extract_payload, -281474976710656
-  %signed_payload = select i1 %is_negative, i64 %sign_extend, i64 %extract_payload
-  %payload_to_f64 = sitofp i64 %signed_payload to double
-  %final_payload = select i1 %is_float29, double %i64_to_f64, double %payload_to_f64
-  %check_qnan30 = and i64 %add_result16, 9221120237041090560
-  %is_float31 = icmp ne i64 %check_qnan30, 9221120237041090560
-  %i64_to_f6432 = bitcast i64 %add_result16 to double
-  %extract_payload33 = and i64 %add_result16, 281474976710655
-  %sign_bit34 = lshr i64 %extract_payload33, 47
-  %is_negative35 = icmp eq i64 %sign_bit34, 1
-  %sign_extend36 = or i64 %extract_payload33, -281474976710656
-  %signed_payload37 = select i1 %is_negative35, i64 %sign_extend36, i64 %extract_payload33
-  %payload_to_f6438 = sitofp i64 %signed_payload37 to double
-  %final_payload39 = select i1 %is_float31, double %i64_to_f6432, double %payload_to_f6438
-  %lhs_to_int = fptosi double %final_payload to i64
-  %rhs_to_int = fptosi double %final_payload39 to i64
-  %shl = shl i64 %lhs_to_int, %rhs_to_int
-  %int_payload = and i64 %shl, 281474976710655
-  %pyobject_int = or i64 9221120237041090560, %int_payload
-  %check_qnan40 = and i64 %pyobject_int, 9221120237041090560
-  %is_float41 = icmp ne i64 %check_qnan40, 9221120237041090560
-  %tag_bits42 = and i64 %pyobject_int, 1970324836974592
-  %tag43 = lshr i64 %tag_bits42, 48
-  %is_bool44 = icmp eq i64 %tag43, 1
-  %is_string45 = icmp eq i64 %tag43, 2
-  %is_list46 = icmp eq i64 %tag43, 3
-  %map_bool47 = select i1 %is_bool44, i64 2, i64 %tag43
-  %map_string48 = select i1 %is_string45, i64 3, i64 %map_bool47
-  %map_list49 = select i1 %is_list46, i64 4, i64 %map_string48
-  %final_tag50 = select i1 %is_float41, i64 1, i64 %map_list49
-  %check_qnan51 = and i64 %pyobject_int, 9221120237041090560
-  %is_float52 = icmp ne i64 %check_qnan51, 9221120237041090560
-  %i64_to_f6453 = bitcast i64 %pyobject_int to double
-  %extract_payload54 = and i64 %pyobject_int, 281474976710655
-  %sign_bit55 = lshr i64 %extract_payload54, 47
-  %is_negative56 = icmp eq i64 %sign_bit55, 1
-  %sign_extend57 = or i64 %extract_payload54, -281474976710656
-  %signed_payload58 = select i1 %is_negative56, i64 %sign_extend57, i64 %extract_payload54
-  %payload_to_f6459 = sitofp i64 %signed_payload58 to double
-  %final_payload60 = select i1 %is_float52, double %i64_to_f6453, double %payload_to_f6459
-  %is_int = icmp eq i64 %final_tag50, 0
-  %is_string61 = icmp eq i64 %final_tag50, 3
-  br i1 %is_string61, label %print_string, label %check_int
-
-check_int:                                        ; preds = %add_merge3
-  br i1 %is_int, label %print_int, label %print_float
-
-print_int:                                        ; preds = %check_int
-  %to_int = fptosi double %final_payload60 to i64
-  %printf_int = call i32 (ptr, ...) @printf(ptr @int_format_string, i64 %to_int)
-  br label %print_end
-
-print_float:                                      ; preds = %check_int
-  %printf_float = call i32 (ptr, ...) @printf(ptr @float_format_string, double %final_payload60)
-  br label %print_end
-
-print_string:                                     ; preds = %add_merge3
-  %extract_ptr_payload = and i64 %pyobject_int, 281474976710655
-  %payload_to_ptr = inttoptr i64 %extract_ptr_payload to ptr
-  %printf_string = call i32 (ptr, ...) @printf(ptr @string_format_string, ptr %payload_to_ptr)
-  br label %print_end
-
-print_end:                                        ; preds = %print_string, %print_float, %print_int
+  %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string, i64 20)
   ret i32 0
 }
 
-declare i64 @strlen(ptr)
+; Function Attrs: nofree nounwind
+declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #0
 
-declare ptr @malloc(i64)
-
-declare ptr @memcpy(ptr, ptr, i64)
-
-declare i32 @printf(ptr, ...)
+attributes #0 = { nofree nounwind }
