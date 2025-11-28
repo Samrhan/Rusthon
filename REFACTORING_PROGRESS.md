@@ -47,6 +47,35 @@ This document tracks the progress of refactoring the Rusthon compiler from a mon
 
 **Status:** Foundation laid for future extraction of expression, statement, and control flow compilation.
 
+**Commit:** `688190f` - "docs: Add generators structure and comprehensive refactoring progress doc"
+
+### ✅ Step 5a: Extract Simple Expression Helpers (Completed)
+**Files Modified:**
+- `src/compiler/generators/expression.rs` (583 lines added)
+- `src/codegen.rs` (reduced from 1650 → 1170 lines, -29%)
+
+**Functions Extracted:**
+- `compile_constant`, `compile_float`, `compile_bool`, `compile_variable`
+- `compile_string_literal`
+- `compile_comparison` (==, !=, <, >, <=, >=)
+- `compile_unary_op` (-, +, ~, not)
+- `compile_list`, `compile_index`, `compile_len`
+- `compile_input`
+- `compile_call` (function calls with default arguments)
+
+**Changes:**
+- Made Compiler fields and methods `pub(crate)` for module access
+- Updated `compile_expression` to delegate to helper functions
+- All helper functions take `&mut Compiler` parameter
+
+**Impact:**
+- Reduced `compile_expression` from ~830 lines to ~380 lines
+- Reduced total `codegen.rs` size by 29% (480 lines)
+- Improved code organization and readability
+- Easier to add new expression types
+
+**Commit:** `3319db2` - "refactor: Extract simple expression helpers into generators/expression.rs (Step 5a)"
+
 ## Pending Steps
 
 ### 🔄 Step 3: CompilationContext Struct (Optional)
@@ -136,9 +165,10 @@ impl<'ctx> Compiler<'ctx> {
 ### Code Size Reduction
 | Metric | Original | Current | Target | Progress |
 |--------|----------|---------|--------|----------|
-| codegen.rs | 2133 lines | 1650 lines | ~600 lines | 23% → 72% |
+| codegen.rs | 2133 lines | 1170 lines | ~600 lines | 45% → 75% |
 | Modules | 1 | 3 | 7-8 | 38% |
 | Tests passing | 174/174 | 174/174 | 174/174 | ✅ 100% |
+| expression.rs | 0 lines | 583 lines | ~800 lines | 73% |
 
 ### Architecture Improvements
 - ✅ Runtime management extracted
@@ -227,14 +257,32 @@ All refactoring steps maintain **100% test compatibility**:
 
 ## Conclusion
 
-The refactoring has successfully laid the groundwork for a more modular, maintainable compiler architecture. While the full vision (thin orchestrator with fully extracted generators) is not yet complete, the improvements so far provide significant benefits:
+The refactoring has successfully transformed the compiler into a more modular, maintainable architecture. Significant progress has been made:
 
-- **23% reduction** in codegen.rs size
+- **45% reduction** in codegen.rs size (2133 → 1170 lines)
 - **100% encapsulation** of type system and runtime
-- **Clear patterns** for future refactoring
-- **Zero test regressions**
+- **73% completion** of expression compilation extraction
+- **Clear patterns** established for future refactoring
+- **Zero test regressions** (174/174 tests passing)
 
-The remaining work (steps 5-9) will complete the transformation to a fully modular architecture, making the compiler much easier to extend with new features like dictionaries, tuples, classes, and more complex Python constructs.
+### Current State
+The compiler now has:
+- ✅ Modular runtime management (`runtime.rs`)
+- ✅ Encapsulated type system (`values.rs`)
+- ✅ Expression helpers extracted (`generators/expression.rs`)
+- ⏳ Binary operations remaining (~380 lines in compile_expression)
+
+### Next Steps
+The remaining work includes:
+1. **Step 5b**: Extract binary operations (arithmetic, bitwise, string concat)
+2. **Step 6**: Extract statement compilation
+3. **Step 7**: Extract control flow
+4. **Step 8**: Extract builtins
+5. **Step 9**: Refactor Compiler to thin orchestrator
+
+**Final Target**: `codegen.rs` reduced to ~600 lines (72% reduction from original)
+
+The improvements so far make the compiler significantly easier to extend with new features like dictionaries, tuples, classes, and more complex Python constructs.
 
 ---
 
