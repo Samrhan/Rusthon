@@ -76,6 +76,31 @@ This document tracks the progress of refactoring the Rusthon compiler from a mon
 
 **Commit:** `3319db2` - "refactor: Extract simple expression helpers into generators/expression.rs (Step 5a)"
 
+### ✅ Step 5b: Extract Binary Operations (Completed)
+**Files Modified:**
+- `src/compiler/generators/expression.rs` (974 lines total, +391 lines added)
+- `src/codegen.rs` (reduced from 1170 → 799 lines, -32%)
+
+**Functions Extracted:**
+- `compile_binary_op` - Handles all binary operations (384 lines):
+  - String concatenation (when both operands are strings)
+  - Bitwise operations (&, |, ^, <<, >>)
+  - Arithmetic operations (+, -, *, /, %)
+  - Type tag checking and float/int result selection
+
+**Changes:**
+- Replaced ~380 lines of inline BinaryOp code with single helper call
+- Added BinOp and all TYPE_TAG_* constants to imports
+- Cleaned up unused imports in codegen.rs
+
+**Impact:**
+- Reduced `codegen.rs` by 32% (1170 → 799 lines)
+- **Total reduction from original: 62.5%** (2133 → 799 lines)
+- Expression compilation now **100% extracted**
+- `compile_expression` reduced to simple dispatch logic (~10 lines per case)
+
+**Commit:** `35dc4d3` - "refactor: Extract binary operations into generators/expression.rs (Step 5b)"
+
 ## Pending Steps
 
 ### 🔄 Step 3: CompilationContext Struct (Optional)
@@ -98,26 +123,6 @@ pub struct CompilationContext<'ctx> {
 - Better separation of state management
 
 **Priority:** Low (nice-to-have, not required for extensibility)
-
-### 📋 Step 5: Extract Expression Compilation (Planned)
-**Target:** `compile_expression` method (~800 lines)
-
-**Approach:**
-- Extract into `generators/expression.rs`
-- Create helper functions for each expression type
-- Maintain access to Compiler state via `&mut Compiler` parameter
-
-**Estimated Impact:** Reduce `codegen.rs` by ~40%
-
-**Challenges:**
-- Complex interdependencies with Compiler state
-- Requires careful handling of borrow checker
-- Need to maintain test compatibility
-
-**Recommendation:** Extract incrementally:
-1. Start with simple cases (constants, variables)
-2. Move to binary operations
-3. Then complex expressions (calls, list operations)
 
 ### 📋 Step 6: Extract Statement Compilation (Planned)
 **Target:** `compile_statement` method (~600 lines)
@@ -165,16 +170,18 @@ impl<'ctx> Compiler<'ctx> {
 ### Code Size Reduction
 | Metric | Original | Current | Target | Progress |
 |--------|----------|---------|--------|----------|
-| codegen.rs | 2133 lines | 1170 lines | ~600 lines | 45% → 75% |
+| codegen.rs | 2133 lines | 799 lines | ~600 lines | 62.5% → 90% |
 | Modules | 1 | 3 | 7-8 | 38% |
 | Tests passing | 174/174 | 174/174 | 174/174 | ✅ 100% |
-| expression.rs | 0 lines | 583 lines | ~800 lines | 73% |
+| expression.rs | 0 lines | 974 lines | ~1000 lines | ✅ 97% |
 
 ### Architecture Improvements
 - ✅ Runtime management extracted
 - ✅ Type system encapsulated
+- ✅ Expression compilation fully extracted (100%)
 - ✅ Clear module boundaries established
-- ⏳ Code generation modularization (in progress)
+- ⏳ Statement compilation extraction (pending)
+- ⏳ Control flow extraction (pending)
 - ⏳ Thin orchestrator pattern (planned)
 
 ## Benefits Achieved So Far
@@ -259,28 +266,28 @@ All refactoring steps maintain **100% test compatibility**:
 
 The refactoring has successfully transformed the compiler into a more modular, maintainable architecture. Significant progress has been made:
 
-- **45% reduction** in codegen.rs size (2133 → 1170 lines)
+- **62.5% reduction** in codegen.rs size (2133 → 799 lines)
 - **100% encapsulation** of type system and runtime
-- **73% completion** of expression compilation extraction
+- **100% completion** of expression compilation extraction
 - **Clear patterns** established for future refactoring
 - **Zero test regressions** (174/174 tests passing)
 
 ### Current State
 The compiler now has:
-- ✅ Modular runtime management (`runtime.rs`)
-- ✅ Encapsulated type system (`values.rs`)
-- ✅ Expression helpers extracted (`generators/expression.rs`)
-- ⏳ Binary operations remaining (~380 lines in compile_expression)
+- ✅ Modular runtime management (`runtime.rs` - 215 lines)
+- ✅ Encapsulated type system (`values.rs` - 534 lines)
+- ✅ **Expression compilation fully extracted** (`generators/expression.rs` - 974 lines)
+- ✅ `compile_expression` reduced to simple dispatch logic (~10 lines per case)
 
 ### Next Steps
 The remaining work includes:
-1. **Step 5b**: Extract binary operations (arithmetic, bitwise, string concat)
-2. **Step 6**: Extract statement compilation
-3. **Step 7**: Extract control flow
-4. **Step 8**: Extract builtins
-5. **Step 9**: Refactor Compiler to thin orchestrator
+1. **Step 6**: Extract statement compilation (~400-500 lines)
+2. **Step 7**: Extract control flow (if, while, for, break, continue)
+3. **Step 8**: Extract builtins (len, print, input)
+4. **Step 9**: Refactor Compiler to thin orchestrator
 
-**Final Target**: `codegen.rs` reduced to ~600 lines (72% reduction from original)
+**Final Target**: `codegen.rs` reduced to ~400-500 lines (77-81% reduction from original)
+**Current Progress**: 799 lines (62.5% reduction, ~50% to target)
 
 The improvements so far make the compiler significantly easier to extend with new features like dictionaries, tuples, classes, and more complex Python constructs.
 
