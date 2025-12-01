@@ -1,5 +1,5 @@
 use crate::ast::{IRExpr, IRStmt};
-use crate::compiler::generators::expression;
+use crate::compiler::generators::{expression, statement};
 use crate::compiler::runtime::{FormatStrings, Runtime};
 use crate::compiler::values::{ValueManager, TYPE_TAG_INT, TYPE_TAG_STRING};
 use inkwell::builder::Builder;
@@ -303,65 +303,12 @@ impl<'ctx> Compiler<'ctx> {
         current_fn: FunctionValue<'ctx>,
     ) -> Result<(), CodeGenError> {
         match stmt {
-            IRStmt::Print(exprs) => {
-                // Handle print with multiple arguments
-                if exprs.is_empty() {
-                    // print() with no arguments just prints a newline
-                    let printf = self.runtime.add_printf(&self.module);
-                    self.builder
-                        .build_call(
-                            printf,
-                            &[self
-                                .format_strings
-                                .get_newline_format_string(&self.builder)
-                                .into()],
-                            "printf_newline",
-                        )
-                        .unwrap();
-                } else {
-                    // Print each argument
-                    for (i, expr) in exprs.iter().enumerate() {
-                        let value = self.compile_expression(expr)?;
-                        let is_last = i == exprs.len() - 1;
-
-                        // Print the value (with newline only for the last one)
-                        self.build_print_value(value, is_last);
-
-                        // Print a space between arguments (but not after the last one)
-                        if !is_last {
-                            let printf = self.runtime.add_printf(&self.module);
-                            self.builder
-                                .build_call(
-                                    printf,
-                                    &[self
-                                        .format_strings
-                                        .get_space_format_string(&self.builder)
-                                        .into()],
-                                    "printf_space",
-                                )
-                                .unwrap();
-                        }
-                    }
-                }
-            }
+            IRStmt::Print(exprs) => statement::compile_print(self, exprs)?,
             IRStmt::Assign { target, value } => {
-                let value = self.compile_expression(value)?;
-                let ptr = self.variables.get(target).copied().unwrap_or_else(|| {
-                    let ptr = self.create_entry_block_alloca(target, current_fn);
-                    self.variables.insert(target.clone(), ptr);
-                    ptr
-                });
-                self.builder.build_store(ptr, value).unwrap();
+                statement::compile_assign(self, target, value, current_fn)?
             }
-            IRStmt::ExprStmt(expr) => {
-                // Evaluate the expression and discard the result
-                // This is used for function calls that are executed for their side effects
-                self.compile_expression(expr)?;
-            }
-            IRStmt::Return(expr) => {
-                let value = self.compile_expression(expr)?;
-                self.builder.build_return(Some(&value)).unwrap();
-            }
+            IRStmt::ExprStmt(expr) => statement::compile_expr_stmt(self, expr)?,
+            IRStmt::Return(expr) => statement::compile_return(self, expr)?,
             IRStmt::FunctionDef { .. } => {
                 // Function definitions are handled separately in compile_program
                 // This should not be reached during normal statement compilation
@@ -671,7 +618,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn create_entry_block_alloca(
+    pub(crate) fn create_entry_block_alloca(
         &self,
         name: &str,
         function: FunctionValue<'ctx>,
@@ -689,7 +636,7 @@ impl<'ctx> Compiler<'ctx> {
         builder.build_alloca(pyobject_type, name).unwrap()
     }
 
-    fn build_print_value(&mut self, pyobject: IntValue<'ctx>, with_newline: bool) {
+    pub(crate) fn build_print_value(&mut self, pyobject: IntValue<'ctx>, with_newline: bool) {
         let printf = self.runtime.add_printf(&self.module);
 
         // Extract tag and payload

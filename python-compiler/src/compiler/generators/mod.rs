@@ -7,7 +7,8 @@
 //! The generators module breaks down the monolithic code generation into focused,
 //! maintainable modules:
 //! - `expression`: Expression compilation (binary ops, calls, literals, etc.)
-//! - `statement`: Statement compilation (to be added)
+//! - `statement`: Statement compilation (print, assign, expr_stmt, return)
 //! - `control`: Control flow compilation (to be added)
 
 pub mod expression;
+pub mod statement;
