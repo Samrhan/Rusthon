@@ -91,12 +91,22 @@ Delivered via a generic module system (`import` resolves aliases; codegen owns
 the module registry) and a pay-as-you-go "may-be-array" analysis so scalar code
 is unchanged.
 
+**Phase 2 — mutation, slicing & I/O** ✅ Done
+```python
+import numpy as np
+a = np.arange(6)
+a[0] = 9.0                # item assignment
+s = a[1:4]                # copy-slicing (a[:2], a[3:], a[:] too)
+print(a)                  # [9. 1. 2. 3. 4. 5.]
+print(a.max(), a.min())   # reductions
+```
+
 **Next phases** 🔮 Planned
 - Additional dtypes (`int64`) tracked in the array header.
-- Slicing (`a[1:3]`), item assignment (`a[0] = x`), boolean/fancy indexing.
+- Boolean/fancy indexing, negative indices, slice assignment (`a[i:j] = ...`).
 - Arrays across user-defined function parameters and return values.
 - Multi-dimensional arrays (`ndim`/shape/strides), `reshape`, `.T`.
-- Linear algebra (`np.dot`, `@`), more reductions/ufuncs, array printing.
+- Linear algebra (`np.dot`, `@`), more ufuncs (`np.sqrt`, …).
 
 ### Data Structures
 

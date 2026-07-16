@@ -48,25 +48,52 @@ g = a / 2        # [0.5, 1.0, 1.5, 2.0]
 Supported operators: `+`, `-`, `*`, `/`, `%`. Scalars broadcast against arrays
 on either side.
 
-## Indexing
+## Indexing and item assignment
 
 ```python
 a = np.array([10.0, 20.0, 30.0])
 print(a[0])      # 10.0
 print(a[2])      # 30.0
+
+a[1] = 99.0      # in-place item assignment
+print(a[1])      # 99.0
+```
+
+## Slicing
+
+Slicing returns a **copy** (a new array). Omitted bounds default to the start
+and the length; out-of-range bounds are clamped, as in NumPy. A step is not
+supported.
+
+```python
+a = np.arange(6)       # [0. 1. 2. 3. 4. 5.]
+print(a[1:4])          # [1. 2. 3.]
+print(a[:2])           # [0. 1.]
+print(a[3:])           # [3. 4. 5.]
+print(a[:])            # full copy
+print(a[2:100])        # clamped -> [2. 3. 4. 5.]
 ```
 
 ## Reductions and size
 
 ```python
-a = np.array([1.0, 2.0, 3.0, 4.0])
+a = np.array([3.0, 1.0, 4.0, 1.0, 5.0])
 
-print(a.sum())   # 10.0
-print(a.mean())  # 2.5
-print(np.sum(a)) # 10.0  (free-function form)
-print(np.mean(a))# 2.5
-print(len(a))    # 4
-print(a.size)    # 4
+print(a.sum())   # 14.0
+print(a.mean())  # 2.8
+print(a.max())   # 5.0
+print(a.min())   # 1.0
+print(np.sum(a)) # 14.0  (free-function form)
+print(np.max(a)) # 5.0
+print(len(a))    # 5
+print(a.size)    # 5
+```
+
+## Printing
+
+```python
+a = np.array([1.0, 2.0, 3.0])
+print(a)         # [1.000000 2.000000 3.000000]
 ```
 
 ## Constants
@@ -78,19 +105,19 @@ print(np.e)      # 2.718281...
 
 ## Current boundaries
 
-This is a first, deliberately small slice. Not yet supported:
+The subset keeps growing. Not yet supported:
 
 - **dtypes other than `float64`** — every array is `float64`.
 - **Multiple dimensions** — arrays are 1-D (the header already carries `ndim`
   so this can grow without a layout change).
-- **Slicing** (`a[1:3]`), fancy/boolean indexing, and item assignment
-  (`a[0] = 5`).
+- **Slice assignment** (`a[1:3] = ...`), fancy/boolean indexing, negative
+  indices, and slice steps. Single-element item assignment and copy-slicing
+  *are* supported.
 - **Arrays across user-defined function boundaries** — arrays are not tracked
   through function parameters or return values yet, so passing an array into a
   user `def` (or returning one) is not supported. NumPy calls, operators,
-  indexing and reductions on locals all work.
-- **Printing an array** — print a scalar element or a reduction instead.
-- Most of the wider NumPy API (`reshape`, `dot`/`@`, `max`/`min`, ufuncs, …).
+  indexing, slicing and reductions on locals all work.
+- Most of the wider NumPy API (`reshape`, `dot`/`@`, ufuncs like `np.sqrt`, …).
 
 See [Limitations](/limitations) for the full list and the
 [Roadmap](/roadmap) for what comes next.

@@ -51,6 +51,14 @@ pub fn compile_method_call<'ctx>(
             expect_argc(method, args, 0)?;
             ndarray::mean(compiler, recv)
         }
+        "max" => {
+            expect_argc(method, args, 0)?;
+            ndarray::reduce_max(compiler, recv)
+        }
+        "min" => {
+            expect_argc(method, args, 0)?;
+            ndarray::reduce_min(compiler, recv)
+        }
         other => Err(CodeGenError::UnsupportedFeature(format!(
             "unknown method '.{other}()'"
         ))),
@@ -110,6 +118,16 @@ fn compile_numpy_call<'ctx>(
             expect_argc(func, args, 1)?;
             let arr = compiler.compile_expression(&args[0])?;
             ndarray::mean(compiler, arr)
+        }
+        "max" => {
+            expect_argc(func, args, 1)?;
+            let arr = compiler.compile_expression(&args[0])?;
+            ndarray::reduce_max(compiler, arr)
+        }
+        "min" => {
+            expect_argc(func, args, 1)?;
+            let arr = compiler.compile_expression(&args[0])?;
+            ndarray::reduce_min(compiler, arr)
         }
         // Constants (lowered to zero-argument module calls).
         "pi" => Ok(compiler.create_pyobject_float(

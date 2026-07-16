@@ -332,6 +332,11 @@ impl<'ctx> Compiler<'ctx> {
             IRStmt::Assign { target, value } => {
                 statement::compile_assign(self, target, value, current_fn)?
             }
+            IRStmt::IndexAssign {
+                target,
+                index,
+                value,
+            } => statement::compile_index_assign(self, target, index, value)?,
             IRStmt::ExprStmt(expr) => statement::compile_expr_stmt(self, expr)?,
             IRStmt::Return(expr) => statement::compile_return(self, expr)?,
             IRStmt::FunctionDef { .. } => {
@@ -569,6 +574,11 @@ impl<'ctx> Compiler<'ctx> {
             IRExpr::UnaryOp { op, operand } => expression::compile_unary_op(self, op, operand),
             IRExpr::List(elements) => expression::compile_list(self, elements),
             IRExpr::Index { list, index } => expression::compile_index(self, list, index),
+            IRExpr::Slice {
+                value,
+                lower,
+                upper,
+            } => expression::compile_slice(self, value, lower.as_deref(), upper.as_deref()),
             IRExpr::Attribute { value, attr } => module::compile_attribute(self, value, attr),
             IRExpr::ModuleCall { module, func, args } => {
                 module::compile_module_call(self, module, func, args)
@@ -680,6 +690,8 @@ impl<'ctx> Compiler<'ctx> {
                 ) && (self.expr_may_be_array(left) || self.expr_may_be_array(right))
             }
             IRExpr::Variable(name) => self.maybe_array_vars.contains(name),
+            // Slicing an array yields an array.
+            IRExpr::Slice { .. } => true,
             _ => false,
         }
     }

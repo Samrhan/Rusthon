@@ -95,6 +95,81 @@ p = np.pi
     }
 }
 
+#[test]
+fn test_item_assignment_lowers_to_index_assign() {
+    let source = r#"
+import numpy as np
+a = np.array([1.0, 2.0, 3.0])
+a[0] = 9.0
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+
+    match &ir[1] {
+        ast::IRStmt::IndexAssign {
+            target,
+            index,
+            value,
+        } => {
+            assert_eq!(*target, ast::IRExpr::Variable("a".to_string()));
+            assert_eq!(*index, ast::IRExpr::Constant(0));
+            assert_eq!(*value, ast::IRExpr::Float(9.0));
+        }
+        other => panic!("Expected IndexAssign, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_slice_lowers_to_slice() {
+    let source = r#"
+import numpy as np
+a = np.array([1.0, 2.0, 3.0, 4.0])
+s = a[1:3]
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+
+    match &ir[1] {
+        ast::IRStmt::Assign { target, value } => {
+            assert_eq!(target, "s");
+            match value {
+                ast::IRExpr::Slice {
+                    value,
+                    lower,
+                    upper,
+                } => {
+                    assert_eq!(**value, ast::IRExpr::Variable("a".to_string()));
+                    assert_eq!(lower.as_deref(), Some(&ast::IRExpr::Constant(1)));
+                    assert_eq!(upper.as_deref(), Some(&ast::IRExpr::Constant(3)));
+                }
+                other => panic!("Expected Slice, got {other:?}"),
+            }
+        }
+        other => panic!("Expected Assign, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_open_slice_has_no_bounds() {
+    let source = r#"
+import numpy as np
+a = np.arange(5)
+s = a[:]
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+
+    match &ir[1] {
+        ast::IRStmt::Assign { value, .. } => match value {
+            ast::IRExpr::Slice { lower, upper, .. } => {
+                assert!(lower.is_none() && upper.is_none());
+            }
+            other => panic!("Expected Slice, got {other:?}"),
+        },
+        other => panic!("Expected Assign, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Codegen snapshots
 // ---------------------------------------------------------------------------
@@ -162,9 +237,74 @@ print(r.sum())
     insta::assert_snapshot!(compile(source));
 }
 
+#[test]
+fn test_array_printing() {
+    let source = r#"
+import numpy as np
+a = np.array([1.0, 2.0, 3.0])
+print(a)
+"#;
+    insta::assert_snapshot!(compile(source));
+}
+
+#[test]
+fn test_array_item_assignment() {
+    let source = r#"
+import numpy as np
+a = np.array([1.0, 2.0, 3.0])
+a[1] = 99.0
+print(a[1])
+"#;
+    insta::assert_snapshot!(compile(source));
+}
+
+#[test]
+fn test_array_slicing() {
+    let source = r#"
+import numpy as np
+a = np.arange(6)
+s = a[1:4]
+print(s.sum())
+print(a[:2].sum())
+print(a[3:].sum())
+"#;
+    insta::assert_snapshot!(compile(source));
+}
+
+#[test]
+fn test_array_min_max() {
+    let source = r#"
+import numpy as np
+a = np.array([3.0, 1.0, 4.0, 1.0, 5.0])
+print(a.max())
+print(a.min())
+print(np.max(a))
+print(np.min(a))
+"#;
+    insta::assert_snapshot!(compile(source));
+}
+
 // ---------------------------------------------------------------------------
 // Behavioural invariants
 // ---------------------------------------------------------------------------
+
+#[test]
+fn test_slicing_non_array_is_rejected() {
+    // Slicing is array-only; a plain list slice must be a compile-time error
+    // rather than silently miscompiling.
+    let source = r#"
+xs = [1, 2, 3]
+s = xs[0:2]
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let context = Context::create();
+    let compiler = codegen::Compiler::new(&context);
+    assert!(
+        compiler.compile_program(&ir).is_err(),
+        "slicing a list should be rejected"
+    );
+}
 
 #[test]
 fn test_elementwise_loop_is_vectorized() {

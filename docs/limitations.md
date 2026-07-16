@@ -402,16 +402,17 @@ import numpy as np
 # ✅ Supported
 a = np.array([1.0, 2.0, 3.0])   # 1-D float64 arrays
 b = a + 1                        # element-wise + scalar broadcasting
-print(a.sum(), a.mean(), a[0], len(a), a.size)
+print(a.sum(), a.max(), a[0], len(a), a.size)
+a[0] = 9.0                       # item assignment
+s = a[0:2]                       # copy-slicing
+print(a)                         # [9.000000 2.000000 3.000000]
 
 # ❌ Not supported yet
 m = np.array([[1.0, 2.0]])       # multi-dimensional arrays
-s = a[0:2]                       # slicing
-a[0] = 9.0                       # item assignment
+a[0:2] = b                       # slice assignment
 x = np.int64                     # dtypes other than float64
 def scale(v): return v * 2       # arrays through function params / returns
 scale(a)                         #   -> unsupported
-print(a)                         # printing a whole array
 ```
 
 ### Error Handling

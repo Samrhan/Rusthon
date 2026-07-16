@@ -73,6 +73,15 @@ pub enum IRExpr {
         list: Box<IRExpr>,
         index: Box<IRExpr>,
     },
+    /// Array slicing `value[lower:upper]` with copy semantics.
+    ///
+    /// Omitted bounds default to `0` (lower) and the length (upper); a step is
+    /// not supported. Currently only ndarrays can be sliced.
+    Slice {
+        value: Box<IRExpr>,
+        lower: Option<Box<IRExpr>>,
+        upper: Option<Box<IRExpr>>,
+    },
     /// Attribute access on a value, e.g. `arr.size` or `arr.ndim`.
     ///
     /// Attribute access on an *imported module* (e.g. `np.pi`) is resolved to a
@@ -104,6 +113,12 @@ pub enum IRStmt {
     Print(Vec<IRExpr>),
     /// An assignment statement.
     Assign { target: String, value: IRExpr },
+    /// An item assignment `target[index] = value` (arrays and lists).
+    IndexAssign {
+        target: IRExpr,
+        index: IRExpr,
+        value: IRExpr,
+    },
     /// An expression statement (evaluates an expression and discards the result).
     ExprStmt(IRExpr),
     /// A function definition.

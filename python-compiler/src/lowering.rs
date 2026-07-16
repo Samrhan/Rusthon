@@ -118,14 +118,29 @@ fn lower_statement(stmt: &ast::Stmt, ctx: &mut LoweringContext) -> Result<IRStmt
             if targets.len() != 1 {
                 return Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())));
             }
-            if let ast::Expr::Name(ast::ExprName { id, .. }) = &targets[0] {
-                let value = lower_expression(value, ctx)?;
-                Ok(IRStmt::Assign {
-                    target: id.to_string(),
-                    value,
-                })
-            } else {
-                Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())))
+            match &targets[0] {
+                ast::Expr::Name(ast::ExprName { id, .. }) => {
+                    let value = lower_expression(value, ctx)?;
+                    Ok(IRStmt::Assign {
+                        target: id.to_string(),
+                        value,
+                    })
+                }
+                // `target[index] = value` — item assignment. Slice assignment
+                // (`a[i:j] = ...`) is not supported.
+                ast::Expr::Subscript(ast::ExprSubscript {
+                    value: base, slice, ..
+                }) if !matches!(slice.as_ref(), ast::Expr::Slice(_)) => {
+                    let target = lower_expression(base, ctx)?;
+                    let index = lower_expression(slice, ctx)?;
+                    let value = lower_expression(value, ctx)?;
+                    Ok(IRStmt::IndexAssign {
+                        target,
+                        index,
+                        value,
+                    })
+                }
+                _ => Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone()))),
             }
         }
         ast::Stmt::FunctionDef(ast::StmtFunctionDef {
@@ -363,12 +378,39 @@ fn lower_expression(expr: &ast::Expr, ctx: &LoweringContext) -> Result<IRExpr, L
             Ok(IRExpr::List(lower_expressions(elts, ctx)?))
         }
         ast::Expr::Subscript(ast::ExprSubscript { value, slice, .. }) => {
-            let list = lower_expression(value, ctx)?;
-            let index = lower_expression(slice, ctx)?;
-            Ok(IRExpr::Index {
-                list: Box::new(list),
-                index: Box::new(index),
-            })
+            let base = lower_expression(value, ctx)?;
+            match slice.as_ref() {
+                // `value[lower:upper]` — slicing (copy). A step is not supported.
+                ast::Expr::Slice(ast::ExprSlice {
+                    lower, upper, step, ..
+                }) => {
+                    if step.is_some() {
+                        return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
+                    }
+                    let lower = lower
+                        .as_ref()
+                        .map(|e| lower_expression(e, ctx))
+                        .transpose()?
+                        .map(Box::new);
+                    let upper = upper
+                        .as_ref()
+                        .map(|e| lower_expression(e, ctx))
+                        .transpose()?
+                        .map(Box::new);
+                    Ok(IRExpr::Slice {
+                        value: Box::new(base),
+                        lower,
+                        upper,
+                    })
+                }
+                _ => {
+                    let index = lower_expression(slice, ctx)?;
+                    Ok(IRExpr::Index {
+                        list: Box::new(base),
+                        index: Box::new(index),
+                    })
+                }
+            }
         }
         _ => Err(LoweringError::UnsupportedExpression(Box::new(expr.clone()))),
     }

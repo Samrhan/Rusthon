@@ -1,0 +1,541 @@
+---
+source: tests/numpy.rs
+expression: compile(source)
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string.7 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string.8 = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+
+; Function Attrs: nofree nounwind
+define noundef i32 @main() local_unnamed_addr #0 {
+entry:
+  %malloc_list = tail call dereferenceable_or_null(48) ptr @malloc(i64 48)
+  store i64 5, ptr %malloc_list, align 4
+  %elem_ptr_0 = getelementptr inbounds i64, ptr %malloc_list, i64 1
+  store i64 4613937818241073152, ptr %elem_ptr_0, align 4
+  %elem_ptr_1 = getelementptr inbounds i64, ptr %malloc_list, i64 2
+  store i64 4607182418800017408, ptr %elem_ptr_1, align 4
+  %elem_ptr_2 = getelementptr inbounds i64, ptr %malloc_list, i64 3
+  store i64 4616189618054758400, ptr %elem_ptr_2, align 4
+  %elem_ptr_3 = getelementptr inbounds i64, ptr %malloc_list, i64 4
+  store i64 4607182418800017408, ptr %elem_ptr_3, align 4
+  %elem_ptr_4 = getelementptr inbounds i64, ptr %malloc_list, i64 5
+  store i64 4617315517961601024, ptr %elem_ptr_4, align 4
+  %ptr_to_int = ptrtoint ptr %malloc_list to i64
+  %list_ptr_payload = and i64 %ptr_to_int, 281474976710655
+  %payload_to_list_ptr = inttoptr i64 %list_ptr_payload to ptr
+  %list_len = load i64, ptr %payload_to_list_ptr, align 4
+  %arr_words = shl i64 %list_len, 3
+  %arr_bytes = add i64 %arr_words, 24
+  %malloc_arr = tail call ptr @malloc(i64 %arr_bytes)
+  %malloc_arr235 = ptrtoint ptr %malloc_arr to i64
+  store i64 0, ptr %malloc_arr, align 4
+  %hdr_ptr2 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
+  store i64 1, ptr %hdr_ptr2, align 4
+  %hdr_ptr3 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
+  store i64 %list_len, ptr %hdr_ptr3, align 4
+  %data_ptr = getelementptr inbounds i64, ptr %malloc_arr, i64 3
+  %loop_cont214.not = icmp eq i64 %list_len, 0
+  br i1 %loop_cont214.not, label %arr_loop_end, label %arr_loop_body.preheader
+
+arr_loop_body.preheader:                          ; preds = %entry
+  %min.iters.check = icmp ult i64 %list_len, 6
+  br i1 %min.iters.check, label %arr_loop_body.preheader236, label %vector.memcheck
+
+vector.memcheck:                                  ; preds = %arr_loop_body.preheader
+  %0 = add i64 %malloc_arr235, 16
+  %1 = sub i64 %0, %list_ptr_payload
+  %diff.check = icmp ult i64 %1, 16
+  br i1 %diff.check, label %arr_loop_body.preheader236, label %vector.ph
+
+vector.ph:                                        ; preds = %vector.memcheck
+  %n.vec = and i64 %list_len, -2
+  br label %vector.body
+
+vector.body:                                      ; preds = %vector.body, %vector.ph
+  %index = phi i64 [ 0, %vector.ph ], [ %index.next, %vector.body ]
+  %2 = or disjoint i64 %index, 1
+  %3 = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 %2
+  %wide.load = load <2 x i64>, ptr %3, align 4
+  %4 = and <2 x i64> %wide.load, <i64 9221120237041090560, i64 9221120237041090560>
+  %5 = icmp eq <2 x i64> %4, <i64 9221120237041090560, i64 9221120237041090560>
+  %6 = bitcast <2 x i64> %wide.load to <2 x double>
+  %7 = and <2 x i64> %wide.load, <i64 281474976710655, i64 281474976710655>
+  %8 = icmp ult <2 x i64> %7, <i64 140737488355328, i64 140737488355328>
+  %9 = select <2 x i1> %8, <2 x i64> zeroinitializer, <2 x i64> <i64 -281474976710656, i64 -281474976710656>
+  %10 = or disjoint <2 x i64> %9, %7
+  %11 = sitofp <2 x i64> %10 to <2 x double>
+  %12 = select <2 x i1> %5, <2 x double> %11, <2 x double> %6
+  %13 = getelementptr inbounds double, ptr %data_ptr, i64 %index
+  store <2 x double> %12, ptr %13, align 8
+  %index.next = add nuw i64 %index, 2
+  %14 = icmp eq i64 %index.next, %n.vec
+  br i1 %14, label %middle.block, label %vector.body, !llvm.loop !0
+
+middle.block:                                     ; preds = %vector.body
+  %cmp.n = icmp eq i64 %list_len, %n.vec
+  br i1 %cmp.n, label %arr_loop_end, label %arr_loop_body.preheader236
+
+arr_loop_body.preheader236:                       ; preds = %vector.memcheck, %arr_loop_body.preheader, %middle.block
+  %i.0215.ph = phi i64 [ 0, %vector.memcheck ], [ 0, %arr_loop_body.preheader ], [ %n.vec, %middle.block ]
+  br label %arr_loop_body
+
+arr_loop_body:                                    ; preds = %arr_loop_body.preheader236, %arr_loop_body
+  %i.0215 = phi i64 [ %list_idx, %arr_loop_body ], [ %i.0215.ph, %arr_loop_body.preheader236 ]
+  %list_idx = add nuw i64 %i.0215, 1
+  %list_elem_ptr = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 %list_idx
+  %boxed_elem = load i64, ptr %list_elem_ptr, align 4
+  %check_qnan = and i64 %boxed_elem, 9221120237041090560
+  %is_float.not = icmp eq i64 %check_qnan, 9221120237041090560
+  %i64_to_f64 = bitcast i64 %boxed_elem to double
+  %extract_payload = and i64 %boxed_elem, 281474976710655
+  %is_negative.not = icmp ult i64 %extract_payload, 140737488355328
+  %masksel213 = select i1 %is_negative.not, i64 0, i64 -281474976710656
+  %signed_payload = or disjoint i64 %masksel213, %extract_payload
+  %payload_to_f64 = sitofp i64 %signed_payload to double
+  %final_payload = select i1 %is_float.not, double %payload_to_f64, double %i64_to_f64
+  %elem_ptr = getelementptr inbounds double, ptr %data_ptr, i64 %i.0215
+  store double %final_payload, ptr %elem_ptr, align 8
+  %loop_cont = icmp ult i64 %list_idx, %list_len
+  br i1 %loop_cont, label %arr_loop_body, label %arr_loop_end, !llvm.loop !3
+
+arr_loop_end:                                     ; preds = %arr_loop_body, %middle.block, %entry
+  %arr_ptr_to_int = ptrtoint ptr %malloc_arr to i64
+  %arr_ptr_payload = and i64 %arr_ptr_to_int, 281474976710655
+  %payload_to_arr_ptr = inttoptr i64 %arr_ptr_payload to ptr
+  %size_ptr = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 2
+  %arr_size = load i64, ptr %size_ptr, align 4
+  %data_ptr6 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
+  %loop_cont12217.not = icmp eq i64 %arr_size, 0
+  br i1 %loop_cont12217.not, label %arr_loop_end10, label %arr_loop_body9.preheader
+
+arr_loop_body9.preheader:                         ; preds = %arr_loop_end
+  %xtraiter = and i64 %arr_size, 3
+  %15 = icmp ult i64 %arr_size, 4
+  br i1 %15, label %arr_loop_end10.loopexit.unr-lcssa, label %arr_loop_body9.preheader.new
+
+arr_loop_body9.preheader.new:                     ; preds = %arr_loop_body9.preheader
+  %unroll_iter = and i64 %arr_size, -4
+  br label %arr_loop_body9
+
+arr_loop_body9:                                   ; preds = %arr_loop_body9, %arr_loop_body9.preheader.new
+  %storemerge219 = phi i64 [ 0, %arr_loop_body9.preheader.new ], [ %i_next15.3, %arr_loop_body9 ]
+  %acc_next216218 = phi double [ 0xFFF0000000000000, %arr_loop_body9.preheader.new ], [ %acc_next.3, %arr_loop_body9 ]
+  %niter = phi i64 [ 0, %arr_loop_body9.preheader.new ], [ %niter.next.3, %arr_loop_body9 ]
+  %elem_ptr14 = getelementptr inbounds double, ptr %data_ptr6, i64 %storemerge219
+  %elem = load double, ptr %elem_ptr14, align 8
+  %is_better = fcmp ogt double %elem, %acc_next216218
+  %acc_next = select i1 %is_better, double %elem, double %acc_next216218
+  %i_next15 = or disjoint i64 %storemerge219, 1
+  %elem_ptr14.1 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next15
+  %elem.1 = load double, ptr %elem_ptr14.1, align 8
+  %is_better.1 = fcmp ogt double %elem.1, %acc_next
+  %acc_next.1 = select i1 %is_better.1, double %elem.1, double %acc_next
+  %i_next15.1 = or disjoint i64 %storemerge219, 2
+  %elem_ptr14.2 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next15.1
+  %elem.2 = load double, ptr %elem_ptr14.2, align 8
+  %is_better.2 = fcmp ogt double %elem.2, %acc_next.1
+  %acc_next.2 = select i1 %is_better.2, double %elem.2, double %acc_next.1
+  %i_next15.2 = or disjoint i64 %storemerge219, 3
+  %elem_ptr14.3 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next15.2
+  %elem.3 = load double, ptr %elem_ptr14.3, align 8
+  %is_better.3 = fcmp ogt double %elem.3, %acc_next.2
+  %acc_next.3 = select i1 %is_better.3, double %elem.3, double %acc_next.2
+  %i_next15.3 = add nuw i64 %storemerge219, 4
+  %niter.next.3 = add i64 %niter, 4
+  %niter.ncmp.3.not = icmp eq i64 %niter.next.3, %unroll_iter
+  br i1 %niter.ncmp.3.not, label %arr_loop_end10.loopexit.unr-lcssa, label %arr_loop_body9
+
+arr_loop_end10.loopexit.unr-lcssa:                ; preds = %arr_loop_body9, %arr_loop_body9.preheader
+  %acc_next.lcssa.ph = phi double [ undef, %arr_loop_body9.preheader ], [ %acc_next.3, %arr_loop_body9 ]
+  %storemerge219.unr = phi i64 [ 0, %arr_loop_body9.preheader ], [ %i_next15.3, %arr_loop_body9 ]
+  %acc_next216218.unr = phi double [ 0xFFF0000000000000, %arr_loop_body9.preheader ], [ %acc_next.3, %arr_loop_body9 ]
+  %lcmp.mod.not = icmp eq i64 %xtraiter, 0
+  br i1 %lcmp.mod.not, label %arr_loop_end10, label %arr_loop_body9.epil
+
+arr_loop_body9.epil:                              ; preds = %arr_loop_end10.loopexit.unr-lcssa, %arr_loop_body9.epil
+  %storemerge219.epil = phi i64 [ %i_next15.epil, %arr_loop_body9.epil ], [ %storemerge219.unr, %arr_loop_end10.loopexit.unr-lcssa ]
+  %acc_next216218.epil = phi double [ %acc_next.epil, %arr_loop_body9.epil ], [ %acc_next216218.unr, %arr_loop_end10.loopexit.unr-lcssa ]
+  %epil.iter = phi i64 [ %epil.iter.next, %arr_loop_body9.epil ], [ 0, %arr_loop_end10.loopexit.unr-lcssa ]
+  %elem_ptr14.epil = getelementptr inbounds double, ptr %data_ptr6, i64 %storemerge219.epil
+  %elem.epil = load double, ptr %elem_ptr14.epil, align 8
+  %is_better.epil = fcmp ogt double %elem.epil, %acc_next216218.epil
+  %acc_next.epil = select i1 %is_better.epil, double %elem.epil, double %acc_next216218.epil
+  %i_next15.epil = add nuw i64 %storemerge219.epil, 1
+  %epil.iter.next = add i64 %epil.iter, 1
+  %epil.iter.cmp.not = icmp eq i64 %epil.iter.next, %xtraiter
+  br i1 %epil.iter.cmp.not, label %arr_loop_end10, label %arr_loop_body9.epil, !llvm.loop !4
+
+arr_loop_end10:                                   ; preds = %arr_loop_end10.loopexit.unr-lcssa, %arr_loop_body9.epil, %arr_loop_end
+  %acc_next216.lcssa = phi double [ 0xFFF0000000000000, %arr_loop_end ], [ %acc_next.lcssa.ph, %arr_loop_end10.loopexit.unr-lcssa ], [ %acc_next.epil, %arr_loop_body9.epil ]
+  %float_as_i64 = bitcast double %acc_next216.lcssa to i64
+  %check_qnan16 = and i64 %float_as_i64, 9221120237041090560
+  %is_float17.not = icmp eq i64 %check_qnan16, 9221120237041090560
+  %tag_bits = lshr i64 %float_as_i64, 48
+  %tag = and i64 %tag_bits, 7
+  %is_bool = icmp eq i64 %tag, 1
+  %is_string = icmp eq i64 %tag, 2
+  %is_list = icmp eq i64 %tag, 3
+  %16 = trunc i64 %tag_bits to i3
+  %17 = select i1 %is_bool, i3 2, i3 %16
+  %18 = select i1 %is_string, i3 3, i3 %17
+  %19 = select i1 %is_list, i3 -4, i3 %18
+  %extract_payload21 = and i64 %float_as_i64, 281474976710655
+  %is_negative23.not = icmp ult i64 %extract_payload21, 140737488355328
+  %masksel = select i1 %is_negative23.not, i64 0, i64 -281474976710656
+  %signed_payload25 = or disjoint i64 %masksel, %extract_payload21
+  %payload_to_f6426 = sitofp i64 %signed_payload25 to double
+  %final_payload27 = select i1 %is_float17.not, double %payload_to_f6426, double %acc_next216.lcssa
+  %trunc = select i1 %is_float17.not, i3 %19, i3 1
+  switch i3 %trunc, label %print_float [
+    i3 3, label %print_string
+    i3 0, label %print_int
+  ]
+
+print_int:                                        ; preds = %arr_loop_end10
+  %to_int = fptosi double %final_payload27 to i64
+  %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.7, i64 %to_int)
+  br label %print_end
+
+print_float:                                      ; preds = %arr_loop_end10
+  %printf_float = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.8, double %final_payload27)
+  br label %print_end
+
+print_string:                                     ; preds = %arr_loop_end10
+  %payload_to_ptr = inttoptr i64 %extract_payload21 to ptr
+  %puts = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr)
+  br label %print_end
+
+print_end:                                        ; preds = %print_string, %print_float, %print_int
+  %arr_size33 = load i64, ptr %size_ptr, align 4
+  %loop_cont41221.not = icmp eq i64 %arr_size33, 0
+  br i1 %loop_cont41221.not, label %arr_loop_end39, label %arr_loop_body38.preheader
+
+arr_loop_body38.preheader:                        ; preds = %print_end
+  %xtraiter238 = and i64 %arr_size33, 3
+  %20 = icmp ult i64 %arr_size33, 4
+  br i1 %20, label %arr_loop_end39.loopexit.unr-lcssa, label %arr_loop_body38.preheader.new
+
+arr_loop_body38.preheader.new:                    ; preds = %arr_loop_body38.preheader
+  %unroll_iter242 = and i64 %arr_size33, -4
+  br label %arr_loop_body38
+
+arr_loop_body38:                                  ; preds = %arr_loop_body38, %arr_loop_body38.preheader.new
+  %storemerge201223 = phi i64 [ 0, %arr_loop_body38.preheader.new ], [ %i_next48.3, %arr_loop_body38 ]
+  %acc_next47220222 = phi double [ 0x7FF0000000000000, %arr_loop_body38.preheader.new ], [ %acc_next47.3, %arr_loop_body38 ]
+  %niter243 = phi i64 [ 0, %arr_loop_body38.preheader.new ], [ %niter243.next.3, %arr_loop_body38 ]
+  %elem_ptr44 = getelementptr inbounds double, ptr %data_ptr6, i64 %storemerge201223
+  %elem45 = load double, ptr %elem_ptr44, align 8
+  %is_better46 = fcmp olt double %elem45, %acc_next47220222
+  %acc_next47 = select i1 %is_better46, double %elem45, double %acc_next47220222
+  %i_next48 = or disjoint i64 %storemerge201223, 1
+  %elem_ptr44.1 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next48
+  %elem45.1 = load double, ptr %elem_ptr44.1, align 8
+  %is_better46.1 = fcmp olt double %elem45.1, %acc_next47
+  %acc_next47.1 = select i1 %is_better46.1, double %elem45.1, double %acc_next47
+  %i_next48.1 = or disjoint i64 %storemerge201223, 2
+  %elem_ptr44.2 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next48.1
+  %elem45.2 = load double, ptr %elem_ptr44.2, align 8
+  %is_better46.2 = fcmp olt double %elem45.2, %acc_next47.1
+  %acc_next47.2 = select i1 %is_better46.2, double %elem45.2, double %acc_next47.1
+  %i_next48.2 = or disjoint i64 %storemerge201223, 3
+  %elem_ptr44.3 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next48.2
+  %elem45.3 = load double, ptr %elem_ptr44.3, align 8
+  %is_better46.3 = fcmp olt double %elem45.3, %acc_next47.2
+  %acc_next47.3 = select i1 %is_better46.3, double %elem45.3, double %acc_next47.2
+  %i_next48.3 = add nuw i64 %storemerge201223, 4
+  %niter243.next.3 = add i64 %niter243, 4
+  %niter243.ncmp.3.not = icmp eq i64 %niter243.next.3, %unroll_iter242
+  br i1 %niter243.ncmp.3.not, label %arr_loop_end39.loopexit.unr-lcssa, label %arr_loop_body38
+
+arr_loop_end39.loopexit.unr-lcssa:                ; preds = %arr_loop_body38, %arr_loop_body38.preheader
+  %acc_next47.lcssa.ph = phi double [ undef, %arr_loop_body38.preheader ], [ %acc_next47.3, %arr_loop_body38 ]
+  %storemerge201223.unr = phi i64 [ 0, %arr_loop_body38.preheader ], [ %i_next48.3, %arr_loop_body38 ]
+  %acc_next47220222.unr = phi double [ 0x7FF0000000000000, %arr_loop_body38.preheader ], [ %acc_next47.3, %arr_loop_body38 ]
+  %lcmp.mod240.not = icmp eq i64 %xtraiter238, 0
+  br i1 %lcmp.mod240.not, label %arr_loop_end39, label %arr_loop_body38.epil
+
+arr_loop_body38.epil:                             ; preds = %arr_loop_end39.loopexit.unr-lcssa, %arr_loop_body38.epil
+  %storemerge201223.epil = phi i64 [ %i_next48.epil, %arr_loop_body38.epil ], [ %storemerge201223.unr, %arr_loop_end39.loopexit.unr-lcssa ]
+  %acc_next47220222.epil = phi double [ %acc_next47.epil, %arr_loop_body38.epil ], [ %acc_next47220222.unr, %arr_loop_end39.loopexit.unr-lcssa ]
+  %epil.iter239 = phi i64 [ %epil.iter239.next, %arr_loop_body38.epil ], [ 0, %arr_loop_end39.loopexit.unr-lcssa ]
+  %elem_ptr44.epil = getelementptr inbounds double, ptr %data_ptr6, i64 %storemerge201223.epil
+  %elem45.epil = load double, ptr %elem_ptr44.epil, align 8
+  %is_better46.epil = fcmp olt double %elem45.epil, %acc_next47220222.epil
+  %acc_next47.epil = select i1 %is_better46.epil, double %elem45.epil, double %acc_next47220222.epil
+  %i_next48.epil = add nuw i64 %storemerge201223.epil, 1
+  %epil.iter239.next = add i64 %epil.iter239, 1
+  %epil.iter239.cmp.not = icmp eq i64 %epil.iter239.next, %xtraiter238
+  br i1 %epil.iter239.cmp.not, label %arr_loop_end39, label %arr_loop_body38.epil, !llvm.loop !6
+
+arr_loop_end39:                                   ; preds = %arr_loop_end39.loopexit.unr-lcssa, %arr_loop_body38.epil, %print_end
+  %acc_next47220.lcssa = phi double [ 0x7FF0000000000000, %print_end ], [ %acc_next47.lcssa.ph, %arr_loop_end39.loopexit.unr-lcssa ], [ %acc_next47.epil, %arr_loop_body38.epil ]
+  %float_as_i6450 = bitcast double %acc_next47220.lcssa to i64
+  %check_qnan51 = and i64 %float_as_i6450, 9221120237041090560
+  %is_float52.not = icmp eq i64 %check_qnan51, 9221120237041090560
+  %tag_bits53 = lshr i64 %float_as_i6450, 48
+  %tag54 = and i64 %tag_bits53, 7
+  %is_bool55 = icmp eq i64 %tag54, 1
+  %is_string56 = icmp eq i64 %tag54, 2
+  %is_list57 = icmp eq i64 %tag54, 3
+  %21 = trunc i64 %tag_bits53 to i3
+  %22 = select i1 %is_bool55, i3 2, i3 %21
+  %23 = select i1 %is_string56, i3 3, i3 %22
+  %24 = select i1 %is_list57, i3 -4, i3 %23
+  %extract_payload65 = and i64 %float_as_i6450, 281474976710655
+  %is_negative67.not = icmp ult i64 %extract_payload65, 140737488355328
+  %masksel202 = select i1 %is_negative67.not, i64 0, i64 -281474976710656
+  %signed_payload69 = or disjoint i64 %masksel202, %extract_payload65
+  %payload_to_f6470 = sitofp i64 %signed_payload69 to double
+  %final_payload71 = select i1 %is_float52.not, double %payload_to_f6470, double %acc_next47220.lcssa
+  %trunc203 = select i1 %is_float52.not, i3 %24, i3 1
+  switch i3 %trunc203, label %print_float76 [
+    i3 3, label %print_string77
+    i3 0, label %print_int75
+  ]
+
+print_int75:                                      ; preds = %arr_loop_end39
+  %to_int79 = fptosi double %final_payload71 to i64
+  %printf_int80 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.7, i64 %to_int79)
+  br label %print_end78
+
+print_float76:                                    ; preds = %arr_loop_end39
+  %printf_float81 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.8, double %final_payload71)
+  br label %print_end78
+
+print_string77:                                   ; preds = %arr_loop_end39
+  %payload_to_ptr83 = inttoptr i64 %extract_payload65 to ptr
+  %puts204 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr83)
+  br label %print_end78
+
+print_end78:                                      ; preds = %print_string77, %print_float76, %print_int75
+  %arr_size89 = load i64, ptr %size_ptr, align 4
+  %loop_cont97226.not = icmp eq i64 %arr_size89, 0
+  br i1 %loop_cont97226.not, label %arr_loop_end95, label %arr_loop_body94.preheader
+
+arr_loop_body94.preheader:                        ; preds = %print_end78
+  %xtraiter244 = and i64 %arr_size89, 3
+  %25 = icmp ult i64 %arr_size89, 4
+  br i1 %25, label %arr_loop_end95.loopexit.unr-lcssa, label %arr_loop_body94.preheader.new
+
+arr_loop_body94.preheader.new:                    ; preds = %arr_loop_body94.preheader
+  %unroll_iter248 = and i64 %arr_size89, -4
+  br label %arr_loop_body94
+
+arr_loop_body94:                                  ; preds = %arr_loop_body94, %arr_loop_body94.preheader.new
+  %storemerge205228 = phi i64 [ 0, %arr_loop_body94.preheader.new ], [ %i_next104.3, %arr_loop_body94 ]
+  %acc_next103225227 = phi double [ 0xFFF0000000000000, %arr_loop_body94.preheader.new ], [ %acc_next103.3, %arr_loop_body94 ]
+  %niter249 = phi i64 [ 0, %arr_loop_body94.preheader.new ], [ %niter249.next.3, %arr_loop_body94 ]
+  %elem_ptr100 = getelementptr inbounds double, ptr %data_ptr6, i64 %storemerge205228
+  %elem101 = load double, ptr %elem_ptr100, align 8
+  %is_better102 = fcmp ogt double %elem101, %acc_next103225227
+  %acc_next103 = select i1 %is_better102, double %elem101, double %acc_next103225227
+  %i_next104 = or disjoint i64 %storemerge205228, 1
+  %elem_ptr100.1 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next104
+  %elem101.1 = load double, ptr %elem_ptr100.1, align 8
+  %is_better102.1 = fcmp ogt double %elem101.1, %acc_next103
+  %acc_next103.1 = select i1 %is_better102.1, double %elem101.1, double %acc_next103
+  %i_next104.1 = or disjoint i64 %storemerge205228, 2
+  %elem_ptr100.2 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next104.1
+  %elem101.2 = load double, ptr %elem_ptr100.2, align 8
+  %is_better102.2 = fcmp ogt double %elem101.2, %acc_next103.1
+  %acc_next103.2 = select i1 %is_better102.2, double %elem101.2, double %acc_next103.1
+  %i_next104.2 = or disjoint i64 %storemerge205228, 3
+  %elem_ptr100.3 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next104.2
+  %elem101.3 = load double, ptr %elem_ptr100.3, align 8
+  %is_better102.3 = fcmp ogt double %elem101.3, %acc_next103.2
+  %acc_next103.3 = select i1 %is_better102.3, double %elem101.3, double %acc_next103.2
+  %i_next104.3 = add nuw i64 %storemerge205228, 4
+  %niter249.next.3 = add i64 %niter249, 4
+  %niter249.ncmp.3.not = icmp eq i64 %niter249.next.3, %unroll_iter248
+  br i1 %niter249.ncmp.3.not, label %arr_loop_end95.loopexit.unr-lcssa, label %arr_loop_body94
+
+arr_loop_end95.loopexit.unr-lcssa:                ; preds = %arr_loop_body94, %arr_loop_body94.preheader
+  %acc_next103.lcssa.ph = phi double [ undef, %arr_loop_body94.preheader ], [ %acc_next103.3, %arr_loop_body94 ]
+  %storemerge205228.unr = phi i64 [ 0, %arr_loop_body94.preheader ], [ %i_next104.3, %arr_loop_body94 ]
+  %acc_next103225227.unr = phi double [ 0xFFF0000000000000, %arr_loop_body94.preheader ], [ %acc_next103.3, %arr_loop_body94 ]
+  %lcmp.mod246.not = icmp eq i64 %xtraiter244, 0
+  br i1 %lcmp.mod246.not, label %arr_loop_end95, label %arr_loop_body94.epil
+
+arr_loop_body94.epil:                             ; preds = %arr_loop_end95.loopexit.unr-lcssa, %arr_loop_body94.epil
+  %storemerge205228.epil = phi i64 [ %i_next104.epil, %arr_loop_body94.epil ], [ %storemerge205228.unr, %arr_loop_end95.loopexit.unr-lcssa ]
+  %acc_next103225227.epil = phi double [ %acc_next103.epil, %arr_loop_body94.epil ], [ %acc_next103225227.unr, %arr_loop_end95.loopexit.unr-lcssa ]
+  %epil.iter245 = phi i64 [ %epil.iter245.next, %arr_loop_body94.epil ], [ 0, %arr_loop_end95.loopexit.unr-lcssa ]
+  %elem_ptr100.epil = getelementptr inbounds double, ptr %data_ptr6, i64 %storemerge205228.epil
+  %elem101.epil = load double, ptr %elem_ptr100.epil, align 8
+  %is_better102.epil = fcmp ogt double %elem101.epil, %acc_next103225227.epil
+  %acc_next103.epil = select i1 %is_better102.epil, double %elem101.epil, double %acc_next103225227.epil
+  %i_next104.epil = add nuw i64 %storemerge205228.epil, 1
+  %epil.iter245.next = add i64 %epil.iter245, 1
+  %epil.iter245.cmp.not = icmp eq i64 %epil.iter245.next, %xtraiter244
+  br i1 %epil.iter245.cmp.not, label %arr_loop_end95, label %arr_loop_body94.epil, !llvm.loop !7
+
+arr_loop_end95:                                   ; preds = %arr_loop_end95.loopexit.unr-lcssa, %arr_loop_body94.epil, %print_end78
+  %acc_next103225.lcssa = phi double [ 0xFFF0000000000000, %print_end78 ], [ %acc_next103.lcssa.ph, %arr_loop_end95.loopexit.unr-lcssa ], [ %acc_next103.epil, %arr_loop_body94.epil ]
+  %float_as_i64106 = bitcast double %acc_next103225.lcssa to i64
+  %check_qnan107 = and i64 %float_as_i64106, 9221120237041090560
+  %is_float108.not = icmp eq i64 %check_qnan107, 9221120237041090560
+  %tag_bits109 = lshr i64 %float_as_i64106, 48
+  %tag110 = and i64 %tag_bits109, 7
+  %is_bool111 = icmp eq i64 %tag110, 1
+  %is_string112 = icmp eq i64 %tag110, 2
+  %is_list113 = icmp eq i64 %tag110, 3
+  %26 = trunc i64 %tag_bits109 to i3
+  %27 = select i1 %is_bool111, i3 2, i3 %26
+  %28 = select i1 %is_string112, i3 3, i3 %27
+  %29 = select i1 %is_list113, i3 -4, i3 %28
+  %extract_payload121 = and i64 %float_as_i64106, 281474976710655
+  %is_negative123.not = icmp ult i64 %extract_payload121, 140737488355328
+  %masksel206 = select i1 %is_negative123.not, i64 0, i64 -281474976710656
+  %signed_payload125 = or disjoint i64 %masksel206, %extract_payload121
+  %payload_to_f64126 = sitofp i64 %signed_payload125 to double
+  %final_payload127 = select i1 %is_float108.not, double %payload_to_f64126, double %acc_next103225.lcssa
+  %trunc207 = select i1 %is_float108.not, i3 %29, i3 1
+  switch i3 %trunc207, label %print_float132 [
+    i3 3, label %print_string133
+    i3 0, label %print_int131
+  ]
+
+print_int131:                                     ; preds = %arr_loop_end95
+  %to_int135 = fptosi double %final_payload127 to i64
+  %printf_int136 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.7, i64 %to_int135)
+  br label %print_end134
+
+print_float132:                                   ; preds = %arr_loop_end95
+  %printf_float137 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.8, double %final_payload127)
+  br label %print_end134
+
+print_string133:                                  ; preds = %arr_loop_end95
+  %payload_to_ptr139 = inttoptr i64 %extract_payload121 to ptr
+  %puts208 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr139)
+  br label %print_end134
+
+print_end134:                                     ; preds = %print_string133, %print_float132, %print_int131
+  %arr_size145 = load i64, ptr %size_ptr, align 4
+  %loop_cont153231.not = icmp eq i64 %arr_size145, 0
+  br i1 %loop_cont153231.not, label %arr_loop_end151, label %arr_loop_body150.preheader
+
+arr_loop_body150.preheader:                       ; preds = %print_end134
+  %xtraiter250 = and i64 %arr_size145, 3
+  %30 = icmp ult i64 %arr_size145, 4
+  br i1 %30, label %arr_loop_end151.loopexit.unr-lcssa, label %arr_loop_body150.preheader.new
+
+arr_loop_body150.preheader.new:                   ; preds = %arr_loop_body150.preheader
+  %unroll_iter254 = and i64 %arr_size145, -4
+  br label %arr_loop_body150
+
+arr_loop_body150:                                 ; preds = %arr_loop_body150, %arr_loop_body150.preheader.new
+  %storemerge209233 = phi i64 [ 0, %arr_loop_body150.preheader.new ], [ %i_next160.3, %arr_loop_body150 ]
+  %acc_next159230232 = phi double [ 0x7FF0000000000000, %arr_loop_body150.preheader.new ], [ %acc_next159.3, %arr_loop_body150 ]
+  %niter255 = phi i64 [ 0, %arr_loop_body150.preheader.new ], [ %niter255.next.3, %arr_loop_body150 ]
+  %elem_ptr156 = getelementptr inbounds double, ptr %data_ptr6, i64 %storemerge209233
+  %elem157 = load double, ptr %elem_ptr156, align 8
+  %is_better158 = fcmp olt double %elem157, %acc_next159230232
+  %acc_next159 = select i1 %is_better158, double %elem157, double %acc_next159230232
+  %i_next160 = or disjoint i64 %storemerge209233, 1
+  %elem_ptr156.1 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next160
+  %elem157.1 = load double, ptr %elem_ptr156.1, align 8
+  %is_better158.1 = fcmp olt double %elem157.1, %acc_next159
+  %acc_next159.1 = select i1 %is_better158.1, double %elem157.1, double %acc_next159
+  %i_next160.1 = or disjoint i64 %storemerge209233, 2
+  %elem_ptr156.2 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next160.1
+  %elem157.2 = load double, ptr %elem_ptr156.2, align 8
+  %is_better158.2 = fcmp olt double %elem157.2, %acc_next159.1
+  %acc_next159.2 = select i1 %is_better158.2, double %elem157.2, double %acc_next159.1
+  %i_next160.2 = or disjoint i64 %storemerge209233, 3
+  %elem_ptr156.3 = getelementptr inbounds double, ptr %data_ptr6, i64 %i_next160.2
+  %elem157.3 = load double, ptr %elem_ptr156.3, align 8
+  %is_better158.3 = fcmp olt double %elem157.3, %acc_next159.2
+  %acc_next159.3 = select i1 %is_better158.3, double %elem157.3, double %acc_next159.2
+  %i_next160.3 = add nuw i64 %storemerge209233, 4
+  %niter255.next.3 = add i64 %niter255, 4
+  %niter255.ncmp.3.not = icmp eq i64 %niter255.next.3, %unroll_iter254
+  br i1 %niter255.ncmp.3.not, label %arr_loop_end151.loopexit.unr-lcssa, label %arr_loop_body150
+
+arr_loop_end151.loopexit.unr-lcssa:               ; preds = %arr_loop_body150, %arr_loop_body150.preheader
+  %acc_next159.lcssa.ph = phi double [ undef, %arr_loop_body150.preheader ], [ %acc_next159.3, %arr_loop_body150 ]
+  %storemerge209233.unr = phi i64 [ 0, %arr_loop_body150.preheader ], [ %i_next160.3, %arr_loop_body150 ]
+  %acc_next159230232.unr = phi double [ 0x7FF0000000000000, %arr_loop_body150.preheader ], [ %acc_next159.3, %arr_loop_body150 ]
+  %lcmp.mod252.not = icmp eq i64 %xtraiter250, 0
+  br i1 %lcmp.mod252.not, label %arr_loop_end151, label %arr_loop_body150.epil
+
+arr_loop_body150.epil:                            ; preds = %arr_loop_end151.loopexit.unr-lcssa, %arr_loop_body150.epil
+  %storemerge209233.epil = phi i64 [ %i_next160.epil, %arr_loop_body150.epil ], [ %storemerge209233.unr, %arr_loop_end151.loopexit.unr-lcssa ]
+  %acc_next159230232.epil = phi double [ %acc_next159.epil, %arr_loop_body150.epil ], [ %acc_next159230232.unr, %arr_loop_end151.loopexit.unr-lcssa ]
+  %epil.iter251 = phi i64 [ %epil.iter251.next, %arr_loop_body150.epil ], [ 0, %arr_loop_end151.loopexit.unr-lcssa ]
+  %elem_ptr156.epil = getelementptr inbounds double, ptr %data_ptr6, i64 %storemerge209233.epil
+  %elem157.epil = load double, ptr %elem_ptr156.epil, align 8
+  %is_better158.epil = fcmp olt double %elem157.epil, %acc_next159230232.epil
+  %acc_next159.epil = select i1 %is_better158.epil, double %elem157.epil, double %acc_next159230232.epil
+  %i_next160.epil = add nuw i64 %storemerge209233.epil, 1
+  %epil.iter251.next = add i64 %epil.iter251, 1
+  %epil.iter251.cmp.not = icmp eq i64 %epil.iter251.next, %xtraiter250
+  br i1 %epil.iter251.cmp.not, label %arr_loop_end151, label %arr_loop_body150.epil, !llvm.loop !8
+
+arr_loop_end151:                                  ; preds = %arr_loop_end151.loopexit.unr-lcssa, %arr_loop_body150.epil, %print_end134
+  %acc_next159230.lcssa = phi double [ 0x7FF0000000000000, %print_end134 ], [ %acc_next159.lcssa.ph, %arr_loop_end151.loopexit.unr-lcssa ], [ %acc_next159.epil, %arr_loop_body150.epil ]
+  %float_as_i64162 = bitcast double %acc_next159230.lcssa to i64
+  %check_qnan163 = and i64 %float_as_i64162, 9221120237041090560
+  %is_float164.not = icmp eq i64 %check_qnan163, 9221120237041090560
+  %tag_bits165 = lshr i64 %float_as_i64162, 48
+  %tag166 = and i64 %tag_bits165, 7
+  %is_bool167 = icmp eq i64 %tag166, 1
+  %is_string168 = icmp eq i64 %tag166, 2
+  %is_list169 = icmp eq i64 %tag166, 3
+  %31 = trunc i64 %tag_bits165 to i3
+  %32 = select i1 %is_bool167, i3 2, i3 %31
+  %33 = select i1 %is_string168, i3 3, i3 %32
+  %34 = select i1 %is_list169, i3 -4, i3 %33
+  %extract_payload177 = and i64 %float_as_i64162, 281474976710655
+  %is_negative179.not = icmp ult i64 %extract_payload177, 140737488355328
+  %masksel210 = select i1 %is_negative179.not, i64 0, i64 -281474976710656
+  %signed_payload181 = or disjoint i64 %masksel210, %extract_payload177
+  %payload_to_f64182 = sitofp i64 %signed_payload181 to double
+  %final_payload183 = select i1 %is_float164.not, double %payload_to_f64182, double %acc_next159230.lcssa
+  %trunc211 = select i1 %is_float164.not, i3 %34, i3 1
+  switch i3 %trunc211, label %print_float188 [
+    i3 3, label %print_string189
+    i3 0, label %print_int187
+  ]
+
+print_int187:                                     ; preds = %arr_loop_end151
+  %to_int191 = fptosi double %final_payload183 to i64
+  %printf_int192 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.7, i64 %to_int191)
+  br label %print_end190
+
+print_float188:                                   ; preds = %arr_loop_end151
+  %printf_float193 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.8, double %final_payload183)
+  br label %print_end190
+
+print_string189:                                  ; preds = %arr_loop_end151
+  %payload_to_ptr195 = inttoptr i64 %extract_payload177 to ptr
+  %puts212 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr195)
+  br label %print_end190
+
+print_end190:                                     ; preds = %print_string189, %print_float188, %print_int187
+  ret i32 0
+}
+
+; Function Attrs: mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite)
+declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #1
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #0
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @puts(ptr nocapture noundef readonly) local_unnamed_addr #0
+
+attributes #0 = { nofree nounwind }
+attributes #1 = { mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite) "alloc-family"="malloc" }
+
+!0 = distinct !{!0, !1, !2}
+!1 = !{!"llvm.loop.isvectorized", i32 1}
+!2 = !{!"llvm.loop.unroll.runtime.disable"}
+!3 = distinct !{!3, !1}
+!4 = distinct !{!4, !5}
+!5 = !{!"llvm.loop.unroll.disable"}
+!6 = distinct !{!6, !5}
+!7 = distinct !{!7, !5}
+!8 = distinct !{!8, !5}

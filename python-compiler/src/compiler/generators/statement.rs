@@ -14,6 +14,7 @@
 
 use crate::ast::IRExpr;
 use crate::codegen::{CodeGenError, Compiler};
+use crate::compiler::generators::ndarray;
 use inkwell::values::FunctionValue;
 
 // ============================================================================
@@ -43,11 +44,19 @@ pub fn compile_print<'ctx>(
     } else {
         // Print each argument
         for (i, expr) in exprs.iter().enumerate() {
-            let value = compiler.compile_expression(expr)?;
             let is_last = i == exprs.len() - 1;
 
-            // Print the value (with newline only for the last one)
-            compiler.build_print_value(value, is_last);
+            // Arrays print as `[e0 e1 ...]`; everything else via the scalar
+            // dispatcher. Gating on `expr_may_be_array` keeps scalar prints
+            // (and their snapshots) unchanged.
+            if compiler.expr_may_be_array(expr) {
+                let value = compiler.compile_expression(expr)?;
+                ndarray::print_array(compiler, value, is_last);
+            } else {
+                let value = compiler.compile_expression(expr)?;
+                // Print the value (with newline only for the last one)
+                compiler.build_print_value(value, is_last);
+            }
 
             // Print a space between arguments (but not after the last one)
             if !is_last {
@@ -94,6 +103,56 @@ pub fn compile_assign<'ctx>(
     } else {
         compiler.maybe_array_vars.remove(target);
     }
+    Ok(())
+}
+
+/// Compiles an item assignment `target[index] = value`.
+///
+/// Dispatches on whether the target might be an array: arrays store a raw `f64`
+/// element, lists store a boxed element after the length header. Gating on
+/// `expr_may_be_array` keeps this coherent with how indexing reads back.
+pub fn compile_index_assign<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    target: &IRExpr,
+    index: &IRExpr,
+    value: &IRExpr,
+) -> Result<(), CodeGenError> {
+    let is_array = compiler.expr_may_be_array(target);
+    let obj = compiler.compile_expression(target)?;
+    let index_obj = compiler.compile_expression(index)?;
+    let value_obj = compiler.compile_expression(value)?;
+
+    if is_array {
+        ndarray::store_index(compiler, obj, index_obj, value_obj);
+        return Ok(());
+    }
+
+    // List store: elements live at offset `index + 1` (after the length header).
+    let (list_ptr, _len) = compiler.extract_list_ptr_and_len(obj);
+    let index_int = compiler
+        .builder
+        .build_float_to_signed_int(
+            compiler.extract_payload(index_obj),
+            compiler.context.i64_type(),
+            "index_int",
+        )
+        .unwrap();
+    let adjusted_index = compiler
+        .builder
+        .build_int_add(
+            index_int,
+            compiler.context.i64_type().const_int(1, false),
+            "adjusted_index",
+        )
+        .unwrap();
+    let pyobject_type = compiler.create_pyobject_type();
+    let elem_ptr = unsafe {
+        compiler
+            .builder
+            .build_in_bounds_gep(pyobject_type, list_ptr, &[adjusted_index], "elem_ptr")
+            .unwrap()
+    };
+    compiler.builder.build_store(elem_ptr, value_obj).unwrap();
     Ok(())
 }
 

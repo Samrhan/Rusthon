@@ -589,6 +589,245 @@ pub fn size<'ctx>(compiler: &mut Compiler<'ctx>, arr_obj: IntValue<'ctx>) -> Int
     compiler.create_pyobject_int(len)
 }
 
+/// `arr[index] = value` — stores a scalar into an array element in place.
+pub fn store_index<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    index_obj: IntValue<'ctx>,
+    value_obj: IntValue<'ctx>,
+) {
+    let base = compiler.extract_array_ptr(arr_obj);
+    let data = data_ptr(compiler, base);
+    let index = scalar_to_i64(compiler, index_obj);
+    let value = compiler.extract_payload(value_obj);
+    store_f64(compiler, data, index, value);
+}
+
+/// `arr[lower:upper]` — returns a new array copying the `[lower, upper)` range.
+///
+/// Bounds are optional (already unboxed to `i64` when present): omitted `lower`
+/// defaults to `0`, omitted `upper` to the length. Both are clamped to
+/// `[0, len]` (and `upper` to `>= lower`) so out-of-range slices yield a shorter
+/// array rather than reading out of bounds, matching NumPy.
+pub fn slice<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    lower: Option<IntValue<'ctx>>,
+    upper: Option<IntValue<'ctx>>,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let i64_type = compiler.context.i64_type();
+    let zero = i64_type.const_int(0, false);
+    let src_base = compiler.extract_array_ptr(arr_obj);
+    let len = array_len(compiler, src_base);
+    let src_data = data_ptr(compiler, src_base);
+
+    let lo = clamp(compiler, lower.unwrap_or(zero), zero, len);
+    let hi = clamp(compiler, upper.unwrap_or(len), lo, len);
+    let new_len = compiler.builder.build_int_sub(hi, lo, "slice_len").unwrap();
+
+    let base = alloc_array(compiler, new_len, DTYPE_F64)?;
+    let dst_data = data_ptr(compiler, base);
+    emit_counted_loop(compiler, new_len, |compiler, k| {
+        let src_index = compiler.builder.build_int_add(lo, k, "src_idx").unwrap();
+        let value = load_f64(compiler, src_data, src_index);
+        store_f64(compiler, dst_data, k, value);
+        Ok(())
+    })?;
+    Ok(compiler.create_pyobject_array(base))
+}
+
+/// Clamps `x` into `[lo, hi]` (assumes `lo <= hi`).
+fn clamp<'ctx>(
+    compiler: &Compiler<'ctx>,
+    x: IntValue<'ctx>,
+    lo: IntValue<'ctx>,
+    hi: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    let below = compiler
+        .builder
+        .build_int_compare(inkwell::IntPredicate::SLT, x, lo, "below")
+        .unwrap();
+    let x = compiler
+        .builder
+        .build_select(below, lo, x, "clamp_lo")
+        .unwrap()
+        .into_int_value();
+    let above = compiler
+        .builder
+        .build_int_compare(inkwell::IntPredicate::SGT, x, hi, "above")
+        .unwrap();
+    compiler
+        .builder
+        .build_select(above, hi, x, "clamp_hi")
+        .unwrap()
+        .into_int_value()
+}
+
+/// `arr.max()` — largest element as a scalar float PyObject.
+pub fn reduce_max<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    reduce_extreme(compiler, arr_obj, true)
+}
+
+/// `arr.min()` — smallest element as a scalar float PyObject.
+pub fn reduce_min<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    reduce_extreme(compiler, arr_obj, false)
+}
+
+/// Shared min/max reduction. The accumulator starts at ∓∞ so any real element
+/// wins on the first iteration; an empty array therefore reduces to ±∞.
+fn reduce_extreme<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    want_max: bool,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let f64_type = compiler.context.f64_type();
+    let base = compiler.extract_array_ptr(arr_obj);
+    let len = array_len(compiler, base);
+    let data = data_ptr(compiler, base);
+
+    let init = if want_max {
+        f64::NEG_INFINITY
+    } else {
+        f64::INFINITY
+    };
+    let acc_ptr = compiler.builder.build_alloca(f64_type, "acc").unwrap();
+    compiler
+        .builder
+        .build_store(acc_ptr, f64_type.const_float(init))
+        .unwrap();
+
+    let pred = if want_max {
+        inkwell::FloatPredicate::OGT
+    } else {
+        inkwell::FloatPredicate::OLT
+    };
+    emit_counted_loop(compiler, len, |compiler, i| {
+        let cur = compiler
+            .builder
+            .build_load(compiler.context.f64_type(), acc_ptr, "acc_cur")
+            .unwrap()
+            .into_float_value();
+        let elem = load_f64(compiler, data, i);
+        let is_better = compiler
+            .builder
+            .build_float_compare(pred, elem, cur, "is_better")
+            .unwrap();
+        let next = compiler
+            .builder
+            .build_select(is_better, elem, cur, "acc_next")
+            .unwrap()
+            .into_float_value();
+        compiler.builder.build_store(acc_ptr, next).unwrap();
+        Ok(())
+    })?;
+
+    let result = compiler
+        .builder
+        .build_load(f64_type, acc_ptr, "acc_final")
+        .unwrap()
+        .into_float_value();
+    Ok(compiler.create_pyobject_float(result))
+}
+
+/// Prints an array as `[e0 e1 ... en]` using the compiler's float format,
+/// followed by a newline when `with_newline` is set.
+pub fn print_array<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    with_newline: bool,
+) {
+    let printf = compiler.runtime.add_printf(&compiler.module);
+    let base = compiler.extract_array_ptr(arr_obj);
+    let len = array_len(compiler, base);
+    let data = data_ptr(compiler, base);
+
+    let lbracket = compiler
+        .builder
+        .build_global_string_ptr("[", "arr_lbracket")
+        .unwrap()
+        .as_pointer_value();
+    let rbracket = compiler
+        .builder
+        .build_global_string_ptr("]", "arr_rbracket")
+        .unwrap()
+        .as_pointer_value();
+    let float_fmt = compiler
+        .format_strings
+        .get_float_format_string_no_newline(&compiler.builder);
+    let space_fmt = compiler
+        .format_strings
+        .get_space_format_string(&compiler.builder);
+
+    compiler
+        .builder
+        .build_call(printf, &[lbracket.into()], "print_lb")
+        .unwrap();
+
+    let zero = compiler.context.i64_type().const_int(0, false);
+    emit_counted_loop(compiler, len, |compiler, i| {
+        // Separate elements with a single space (before every element but the first).
+        let needs_space = compiler
+            .builder
+            .build_int_compare(inkwell::IntPredicate::UGT, i, zero, "needs_space")
+            .unwrap();
+        let current_fn = compiler
+            .builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap();
+        let space_bb = compiler
+            .context
+            .append_basic_block(current_fn, "print_space");
+        let elem_bb = compiler
+            .context
+            .append_basic_block(current_fn, "print_elem");
+        compiler
+            .builder
+            .build_conditional_branch(needs_space, space_bb, elem_bb)
+            .unwrap();
+
+        compiler.builder.position_at_end(space_bb);
+        compiler
+            .builder
+            .build_call(printf, &[space_fmt.into()], "print_sep")
+            .unwrap();
+        compiler
+            .builder
+            .build_unconditional_branch(elem_bb)
+            .unwrap();
+
+        compiler.builder.position_at_end(elem_bb);
+        let elem = load_f64(compiler, data, i);
+        compiler
+            .builder
+            .build_call(printf, &[float_fmt.into(), elem.into()], "print_elem")
+            .unwrap();
+        Ok(())
+    })
+    .expect("array print loop");
+
+    compiler
+        .builder
+        .build_call(printf, &[rbracket.into()], "print_rb")
+        .unwrap();
+    if with_newline {
+        let nl = compiler
+            .format_strings
+            .get_newline_format_string(&compiler.builder);
+        compiler
+            .builder
+            .build_call(printf, &[nl.into()], "print_nl")
+            .unwrap();
+    }
+}
+
 /// Unboxes a scalar PyObject (int/float/bool) to an `i64` index value.
 fn scalar_to_i64<'ctx>(compiler: &Compiler<'ctx>, obj: IntValue<'ctx>) -> IntValue<'ctx> {
     let payload = compiler.extract_payload(obj);

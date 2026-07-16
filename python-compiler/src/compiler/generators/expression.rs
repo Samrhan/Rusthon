@@ -438,6 +438,47 @@ pub fn compile_index<'ctx>(
     Ok(phi.as_basic_value().into_int_value())
 }
 
+/// Compiles an array slice `value[lower:upper]` (copy semantics).
+///
+/// Only arrays can be sliced in this subset; a definitely-scalar receiver is a
+/// compile-time error. Omitted bounds are passed through as `None` and defaulted
+/// (and clamped) inside `ndarray::slice`.
+pub fn compile_slice<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    value: &IRExpr,
+    lower: Option<&IRExpr>,
+    upper: Option<&IRExpr>,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    if !compiler.expr_may_be_array(value) {
+        return Err(CodeGenError::UnsupportedFeature(
+            "slicing is only supported on NumPy arrays".to_string(),
+        ));
+    }
+    let obj = compiler.compile_expression(value)?;
+    let lower = match lower {
+        Some(e) => Some(slice_bound(compiler, e)?),
+        None => None,
+    };
+    let upper = match upper {
+        Some(e) => Some(slice_bound(compiler, e)?),
+        None => None,
+    };
+    ndarray::slice(compiler, obj, lower, upper)
+}
+
+/// Compiles a slice-bound expression and unboxes it to an `i64`.
+fn slice_bound<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    e: &IRExpr,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let v = compiler.compile_expression(e)?;
+    let payload = compiler.extract_payload(v);
+    Ok(compiler
+        .builder
+        .build_float_to_signed_int(payload, compiler.context.i64_type(), "slice_bound")
+        .unwrap())
+}
+
 /// Compiles a `len()` expression.
 ///
 /// Dispatches to an array-aware implementation only when the argument might be
