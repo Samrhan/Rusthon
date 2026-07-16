@@ -198,14 +198,19 @@ class MyClass:
 
 ### Modules and Imports
 
-❌ **Import**
+⚠️ **Import — NumPy only**
 ```python
-# Not supported
-import math
-from os import path
+# Supported: the built-in compiled NumPy subset
+import numpy as np        # ✅ Works
+from numpy import array   # ✅ Works
 
-# All code must be in single file
+# Not supported: arbitrary modules / the real standard library
+import math               # ❌
+from os import path       # ❌
+
+# All user code must still live in a single file.
 ```
+See [NumPy](/language-features/numpy) for the supported array subset.
 
 ❌ **Multiple Files**
 ```python
@@ -383,7 +388,30 @@ import random
 import datetime
 import json
 
-# Only built-in features available
+# Only built-in features available (plus the compiled NumPy subset)
+```
+
+### NumPy Subset Boundaries
+
+A subset of NumPy is compiled natively (see [NumPy](/language-features/numpy)),
+but with clear boundaries:
+
+```python
+import numpy as np
+
+# ✅ Supported
+a = np.array([1.0, 2.0, 3.0])   # 1-D float64 arrays
+b = a + 1                        # element-wise + scalar broadcasting
+print(a.sum(), a.mean(), a[0], len(a), a.size)
+
+# ❌ Not supported yet
+m = np.array([[1.0, 2.0]])       # multi-dimensional arrays
+s = a[0:2]                       # slicing
+a[0] = 9.0                       # item assignment
+x = np.int64                     # dtypes other than float64
+def scale(v): return v * 2       # arrays through function params / returns
+scale(a)                         #   -> unsupported
+print(a)                         # printing a whole array
 ```
 
 ### Error Handling

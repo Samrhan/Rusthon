@@ -1,0 +1,257 @@
+---
+source: tests/numpy.rs
+expression: compile(source)
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string.1 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string.2 = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+
+; Function Attrs: nofree nounwind
+define noundef i32 @main() local_unnamed_addr #0 {
+entry:
+  %malloc_arr = tail call dereferenceable_or_null(64) ptr @malloc(i64 64)
+  store i64 0, ptr %malloc_arr, align 4
+  %hdr_ptr1 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
+  store i64 1, ptr %hdr_ptr1, align 4
+  %hdr_ptr2 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
+  store i64 5, ptr %hdr_ptr2, align 4
+  %data_ptr = getelementptr inbounds i64, ptr %malloc_arr, i64 3
+  store <2 x double> <double 0.000000e+00, double 1.000000e+00>, ptr %data_ptr, align 8
+  %elem_ptr.2 = getelementptr inbounds i64, ptr %malloc_arr, i64 5
+  store <2 x double> <double 2.000000e+00, double 3.000000e+00>, ptr %elem_ptr.2, align 8
+  %elem_ptr.4 = getelementptr inbounds i64, ptr %malloc_arr, i64 7
+  store double 4.000000e+00, ptr %elem_ptr.4, align 8
+  %arr_ptr_to_int = ptrtoint ptr %malloc_arr to i64
+  %arr_ptr_payload = and i64 %arr_ptr_to_int, 281474976710655
+  %payload_to_arr_ptr = inttoptr i64 %arr_ptr_payload to ptr
+  %data_ptr5 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
+  %size_ptr = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 2
+  %arr_size = load i64, ptr %size_ptr, align 4
+  %arr_words = shl i64 %arr_size, 3
+  %arr_bytes = add i64 %arr_words, 24
+  %malloc_arr11 = tail call ptr @malloc(i64 %arr_bytes)
+  store i64 0, ptr %malloc_arr11, align 4
+  %hdr_ptr13 = getelementptr inbounds i64, ptr %malloc_arr11, i64 1
+  store i64 1, ptr %hdr_ptr13, align 4
+  %hdr_ptr14 = getelementptr inbounds i64, ptr %malloc_arr11, i64 2
+  store i64 %arr_size, ptr %hdr_ptr14, align 4
+  %data_ptr15 = getelementptr inbounds i64, ptr %malloc_arr11, i64 3
+  %loop_cont21250.not = icmp eq i64 %arr_size, 0
+  br i1 %loop_cont21250.not, label %arr_loop_end19, label %arr_loop_body18.preheader
+
+arr_loop_body18.preheader:                        ; preds = %entry
+  %malloc_arr11254 = ptrtoint ptr %malloc_arr11 to i64
+  %min.iters.check = icmp ult i64 %arr_size, 4
+  %0 = sub i64 %malloc_arr11254, %arr_ptr_payload
+  %diff.check = icmp ult i64 %0, 32
+  %or.cond = or i1 %min.iters.check, %diff.check
+  br i1 %or.cond, label %arr_loop_body18.preheader274, label %vector.ph
+
+vector.ph:                                        ; preds = %arr_loop_body18.preheader
+  %n.vec = and i64 %arr_size, -4
+  br label %vector.body
+
+vector.body:                                      ; preds = %vector.body, %vector.ph
+  %index = phi i64 [ 0, %vector.ph ], [ %index.next, %vector.body ]
+  %1 = getelementptr inbounds double, ptr %data_ptr5, i64 %index
+  %2 = getelementptr inbounds double, ptr %1, i64 2
+  %wide.load = load <2 x double>, ptr %1, align 8
+  %wide.load255 = load <2 x double>, ptr %2, align 8
+  %3 = fmul <2 x double> %wide.load, <double 2.000000e+00, double 2.000000e+00>
+  %4 = fmul <2 x double> %wide.load255, <double 2.000000e+00, double 2.000000e+00>
+  %5 = getelementptr inbounds double, ptr %data_ptr15, i64 %index
+  %6 = getelementptr inbounds double, ptr %5, i64 2
+  store <2 x double> %3, ptr %5, align 8
+  store <2 x double> %4, ptr %6, align 8
+  %index.next = add nuw i64 %index, 4
+  %7 = icmp eq i64 %index.next, %n.vec
+  br i1 %7, label %middle.block, label %vector.body, !llvm.loop !0
+
+middle.block:                                     ; preds = %vector.body
+  %cmp.n = icmp eq i64 %arr_size, %n.vec
+  br i1 %cmp.n, label %arr_loop_end19, label %arr_loop_body18.preheader274
+
+arr_loop_body18.preheader274:                     ; preds = %arr_loop_body18.preheader, %middle.block
+  %storemerge251.ph = phi i64 [ 0, %arr_loop_body18.preheader ], [ %n.vec, %middle.block ]
+  br label %arr_loop_body18
+
+arr_loop_body18:                                  ; preds = %arr_loop_body18.preheader274, %arr_loop_body18
+  %storemerge251 = phi i64 [ %i_next27, %arr_loop_body18 ], [ %storemerge251.ph, %arr_loop_body18.preheader274 ]
+  %elem_ptr23 = getelementptr inbounds double, ptr %data_ptr5, i64 %storemerge251
+  %elem = load double, ptr %elem_ptr23, align 8
+  %arr_mul = fmul double %elem, 2.000000e+00
+  %elem_ptr26 = getelementptr inbounds double, ptr %data_ptr15, i64 %storemerge251
+  store double %arr_mul, ptr %elem_ptr26, align 8
+  %i_next27 = add nuw i64 %storemerge251, 1
+  %loop_cont21 = icmp ult i64 %i_next27, %arr_size
+  br i1 %loop_cont21, label %arr_loop_body18, label %arr_loop_end19, !llvm.loop !3
+
+arr_loop_end19:                                   ; preds = %arr_loop_body18, %middle.block, %entry
+  %arr_ptr_to_int28 = ptrtoint ptr %malloc_arr11 to i64
+  %arr_ptr_payload29 = and i64 %arr_ptr_to_int28, 281474976710655
+  %malloc_arr93 = tail call ptr @malloc(i64 %arr_bytes)
+  store i64 0, ptr %malloc_arr93, align 4
+  %hdr_ptr95 = getelementptr inbounds i64, ptr %malloc_arr93, i64 1
+  store i64 1, ptr %hdr_ptr95, align 4
+  %hdr_ptr96 = getelementptr inbounds i64, ptr %malloc_arr93, i64 2
+  store i64 %arr_size, ptr %hdr_ptr96, align 4
+  %data_ptr97 = getelementptr inbounds i64, ptr %malloc_arr93, i64 3
+  br i1 %loop_cont21250.not, label %arr_loop_end101, label %arr_loop_body100.preheader
+
+arr_loop_body100.preheader:                       ; preds = %arr_loop_end19
+  %malloc_arr93257 = ptrtoint ptr %malloc_arr93 to i64
+  %min.iters.check261 = icmp ult i64 %arr_size, 4
+  %8 = sub i64 %malloc_arr93257, %arr_ptr_payload
+  %diff.check258 = icmp ult i64 %8, 32
+  %or.cond272 = or i1 %min.iters.check261, %diff.check258
+  br i1 %or.cond272, label %arr_loop_body100.preheader273, label %vector.ph262
+
+vector.ph262:                                     ; preds = %arr_loop_body100.preheader
+  %n.vec264 = and i64 %arr_size, -4
+  br label %vector.body267
+
+vector.body267:                                   ; preds = %vector.body267, %vector.ph262
+  %index268 = phi i64 [ 0, %vector.ph262 ], [ %index.next271, %vector.body267 ]
+  %9 = getelementptr inbounds double, ptr %data_ptr5, i64 %index268
+  %10 = getelementptr inbounds double, ptr %9, i64 2
+  %wide.load269 = load <2 x double>, ptr %9, align 8
+  %wide.load270 = load <2 x double>, ptr %10, align 8
+  %11 = fadd <2 x double> %wide.load269, <double 1.000000e+01, double 1.000000e+01>
+  %12 = fadd <2 x double> %wide.load270, <double 1.000000e+01, double 1.000000e+01>
+  %13 = getelementptr inbounds double, ptr %data_ptr97, i64 %index268
+  %14 = getelementptr inbounds double, ptr %13, i64 2
+  store <2 x double> %11, ptr %13, align 8
+  store <2 x double> %12, ptr %14, align 8
+  %index.next271 = add nuw i64 %index268, 4
+  %15 = icmp eq i64 %index.next271, %n.vec264
+  br i1 %15, label %middle.block259, label %vector.body267, !llvm.loop !4
+
+middle.block259:                                  ; preds = %vector.body267
+  %cmp.n266 = icmp eq i64 %arr_size, %n.vec264
+  br i1 %cmp.n266, label %arr_loop_end101, label %arr_loop_body100.preheader273
+
+arr_loop_body100.preheader273:                    ; preds = %arr_loop_body100.preheader, %middle.block259
+  %storemerge243253.ph = phi i64 [ 0, %arr_loop_body100.preheader ], [ %n.vec264, %middle.block259 ]
+  br label %arr_loop_body100
+
+arr_loop_body100:                                 ; preds = %arr_loop_body100.preheader273, %arr_loop_body100
+  %storemerge243253 = phi i64 [ %i_next112, %arr_loop_body100 ], [ %storemerge243253.ph, %arr_loop_body100.preheader273 ]
+  %elem_ptr109 = getelementptr inbounds double, ptr %data_ptr5, i64 %storemerge243253
+  %elem110 = load double, ptr %elem_ptr109, align 8
+  %arr_add = fadd double %elem110, 1.000000e+01
+  %elem_ptr111 = getelementptr inbounds double, ptr %data_ptr97, i64 %storemerge243253
+  store double %arr_add, ptr %elem_ptr111, align 8
+  %i_next112 = add nuw i64 %storemerge243253, 1
+  %loop_cont103 = icmp ult i64 %i_next112, %arr_size
+  br i1 %loop_cont103, label %arr_loop_body100, label %arr_loop_end101, !llvm.loop !5
+
+arr_loop_end101:                                  ; preds = %arr_loop_body100, %middle.block259, %arr_loop_end19
+  %arr_ptr_to_int113 = ptrtoint ptr %malloc_arr93 to i64
+  %arr_ptr_payload114 = and i64 %arr_ptr_to_int113, 281474976710655
+  %payload_to_arr_ptr158 = inttoptr i64 %arr_ptr_payload29 to ptr
+  %elem_ptr160 = getelementptr inbounds i64, ptr %payload_to_arr_ptr158, i64 7
+  %elem161244 = load i64, ptr %elem_ptr160, align 8
+  %check_qnan164 = and i64 %elem161244, 9221120237041090560
+  %is_float165.not = icmp eq i64 %check_qnan164, 9221120237041090560
+  %tag_bits166 = lshr i64 %elem161244, 48
+  %tag167 = and i64 %tag_bits166, 7
+  %is_bool168 = icmp eq i64 %tag167, 1
+  %is_string169 = icmp eq i64 %tag167, 2
+  %is_list170 = icmp eq i64 %tag167, 3
+  %16 = trunc i64 %tag_bits166 to i3
+  %17 = select i1 %is_bool168, i3 2, i3 %16
+  %18 = select i1 %is_string169, i3 3, i3 %17
+  %19 = select i1 %is_list170, i3 -4, i3 %18
+  %i64_to_f64177 = bitcast i64 %elem161244 to double
+  %extract_payload178 = and i64 %elem161244, 281474976710655
+  %is_negative180.not = icmp ult i64 %extract_payload178, 140737488355328
+  %masksel = select i1 %is_negative180.not, i64 0, i64 -281474976710656
+  %signed_payload182 = or disjoint i64 %masksel, %extract_payload178
+  %payload_to_f64183 = sitofp i64 %signed_payload182 to double
+  %final_payload184 = select i1 %is_float165.not, double %payload_to_f64183, double %i64_to_f64177
+  %trunc = select i1 %is_float165.not, i3 %19, i3 1
+  switch i3 %trunc, label %print_float [
+    i3 3, label %print_string
+    i3 0, label %print_int
+  ]
+
+print_int:                                        ; preds = %arr_loop_end101
+  %to_int = fptosi double %final_payload184 to i64
+  %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int)
+  br label %index_merge193
+
+print_float:                                      ; preds = %arr_loop_end101
+  %printf_float = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.2, double %final_payload184)
+  br label %index_merge193
+
+print_string:                                     ; preds = %arr_loop_end101
+  %payload_to_ptr187 = inttoptr i64 %extract_payload178 to ptr
+  %puts = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr187)
+  br label %index_merge193
+
+index_merge193:                                   ; preds = %print_string, %print_float, %print_int
+  %payload_to_arr_ptr195 = inttoptr i64 %arr_ptr_payload114 to ptr
+  %data_ptr196 = getelementptr inbounds i64, ptr %payload_to_arr_ptr195, i64 3
+  %elem198245 = load i64, ptr %data_ptr196, align 8
+  %check_qnan207 = and i64 %elem198245, 9221120237041090560
+  %is_float208.not = icmp eq i64 %check_qnan207, 9221120237041090560
+  %tag_bits209 = lshr i64 %elem198245, 48
+  %tag210 = and i64 %tag_bits209, 7
+  %is_bool211 = icmp eq i64 %tag210, 1
+  %is_string212 = icmp eq i64 %tag210, 2
+  %is_list213 = icmp eq i64 %tag210, 3
+  %20 = trunc i64 %tag_bits209 to i3
+  %21 = select i1 %is_bool211, i3 2, i3 %20
+  %22 = select i1 %is_string212, i3 3, i3 %21
+  %23 = select i1 %is_list213, i3 -4, i3 %22
+  %i64_to_f64220 = bitcast i64 %elem198245 to double
+  %extract_payload221 = and i64 %elem198245, 281474976710655
+  %is_negative223.not = icmp ult i64 %extract_payload221, 140737488355328
+  %masksel246 = select i1 %is_negative223.not, i64 0, i64 -281474976710656
+  %signed_payload225 = or disjoint i64 %masksel246, %extract_payload221
+  %payload_to_f64226 = sitofp i64 %signed_payload225 to double
+  %final_payload227 = select i1 %is_float208.not, double %payload_to_f64226, double %i64_to_f64220
+  %trunc247 = select i1 %is_float208.not, i3 %23, i3 1
+  switch i3 %trunc247, label %print_float232 [
+    i3 3, label %print_string233
+    i3 0, label %print_int231
+  ]
+
+print_int231:                                     ; preds = %index_merge193
+  %to_int235 = fptosi double %final_payload227 to i64
+  %printf_int236 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int235)
+  br label %print_end234
+
+print_float232:                                   ; preds = %index_merge193
+  %printf_float237 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.2, double %final_payload227)
+  br label %print_end234
+
+print_string233:                                  ; preds = %index_merge193
+  %payload_to_ptr239 = inttoptr i64 %extract_payload221 to ptr
+  %puts248 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr239)
+  br label %print_end234
+
+print_end234:                                     ; preds = %print_string233, %print_float232, %print_int231
+  ret i32 0
+}
+
+; Function Attrs: mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite)
+declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #1
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #0
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @puts(ptr nocapture noundef readonly) local_unnamed_addr #0
+
+attributes #0 = { nofree nounwind }
+attributes #1 = { mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite) "alloc-family"="malloc" }
+
+!0 = distinct !{!0, !1, !2}
+!1 = !{!"llvm.loop.isvectorized", i32 1}
+!2 = !{!"llvm.loop.unroll.runtime.disable"}
+!3 = distinct !{!3, !1}
+!4 = distinct !{!4, !1, !2}
+!5 = distinct !{!5, !1}

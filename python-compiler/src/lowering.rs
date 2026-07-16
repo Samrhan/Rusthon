@@ -1,6 +1,7 @@
 use crate::ast::{BinOp, CmpOp, IRExpr, IRStmt, UnaryOp};
 use num_traits::ToPrimitive;
 use rustpython_parser::ast;
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -17,13 +18,86 @@ pub enum LoweringError {
     InvalidComparison,
 }
 
+/// Tracks state that must persist across statements while lowering.
+///
+/// Imports are the motivating case: `import numpy as np` has no runtime effect
+/// but binds the local name `np` to the module `numpy` for the rest of the
+/// program. The context makes that binding available to later expressions so
+/// `np.array(...)` can be resolved to an [`IRExpr::ModuleCall`].
+///
+/// This mechanism is deliberately module-agnostic: nothing here knows what
+/// `numpy` is. Codegen owns the list of modules it can actually generate code
+/// for; lowering only records the name bindings the user declared.
+#[derive(Debug, Default)]
+struct LoweringContext {
+    /// Maps a local module alias to its canonical module name.
+    /// `import numpy as np` inserts `"np" -> "numpy"`;
+    /// `import numpy` inserts `"numpy" -> "numpy"`.
+    module_aliases: HashMap<String, String>,
+    /// Maps a name bound by `from <module> import <name> [as <alias>]` to the
+    /// `(canonical_module, original_name)` pair it refers to.
+    from_imports: HashMap<String, (String, String)>,
+}
+
+impl LoweringContext {
+    /// Resolves a bare name to a module if it was imported as a module alias.
+    fn module_for_alias(&self, name: &str) -> Option<&str> {
+        self.module_aliases.get(name).map(String::as_str)
+    }
+}
+
 /// Lowers a `rustpython-parser` AST to the custom IR.
 pub fn lower_program(stmts: &[ast::Stmt]) -> Result<Vec<IRStmt>, LoweringError> {
-    stmts.iter().map(lower_statement).collect()
+    let mut ctx = LoweringContext::default();
+    lower_block(stmts, &mut ctx)
+}
+
+/// Lowers a block of statements, threading the lowering context.
+///
+/// Import statements update the context and produce no IR (they have no runtime
+/// effect), so this cannot be a simple 1:1 `map` over statements.
+fn lower_block(
+    stmts: &[ast::Stmt],
+    ctx: &mut LoweringContext,
+) -> Result<Vec<IRStmt>, LoweringError> {
+    let mut out = Vec::with_capacity(stmts.len());
+    for stmt in stmts {
+        match stmt {
+            ast::Stmt::Import(ast::StmtImport { names, .. }) => {
+                for alias in names {
+                    let module = alias.name.to_string();
+                    let local = alias
+                        .asname
+                        .as_ref()
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| module.clone());
+                    ctx.module_aliases.insert(local, module);
+                }
+            }
+            ast::Stmt::ImportFrom(ast::StmtImportFrom { module, names, .. }) => {
+                // `from numpy import array as arr` binds `arr -> (numpy, array)`.
+                // A relative import (`from . import x`) has no module name; skip it.
+                if let Some(module) = module {
+                    let module = module.to_string();
+                    for alias in names {
+                        let orig = alias.name.to_string();
+                        let local = alias
+                            .asname
+                            .as_ref()
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|| orig.clone());
+                        ctx.from_imports.insert(local, (module.clone(), orig));
+                    }
+                }
+            }
+            other => out.push(lower_statement(other, ctx)?),
+        }
+    }
+    Ok(out)
 }
 
 /// Lowers a single statement.
-fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
+fn lower_statement(stmt: &ast::Stmt, ctx: &mut LoweringContext) -> Result<IRStmt, LoweringError> {
     match stmt {
         ast::Stmt::Expr(ast::StmtExpr { value, .. }) => {
             // Special handling for print() calls
@@ -31,14 +105,13 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 if let ast::Expr::Name(ast::ExprName { id, .. }) = func.as_ref() {
                     if id == "print" {
                         // Lower all arguments
-                        let lowered_args: Result<Vec<IRExpr>, LoweringError> =
-                            args.iter().map(lower_expression).collect();
-                        return Ok(IRStmt::Print(lowered_args?));
+                        let lowered_args = lower_expressions(args, ctx)?;
+                        return Ok(IRStmt::Print(lowered_args));
                     }
                 }
             }
             // General expression statement (e.g., function call without using result)
-            let expr = lower_expression(value)?;
+            let expr = lower_expression(value, ctx)?;
             Ok(IRStmt::ExprStmt(expr))
         }
         ast::Stmt::Assign(ast::StmtAssign { targets, value, .. }) => {
@@ -46,7 +119,7 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                 return Err(LoweringError::UnsupportedStatement(Box::new(stmt.clone())));
             }
             if let ast::Expr::Name(ast::ExprName { id, .. }) = &targets[0] {
-                let value = lower_expression(value)?;
+                let value = lower_expression(value, ctx)?;
                 Ok(IRStmt::Assign {
                     target: id.to_string(),
                     value,
@@ -73,56 +146,48 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
             // Default values apply to the last N parameters
             let defaults_start = num_params - num_defaults;
             for (i, default_expr) in defaults_vec.iter().enumerate() {
-                let lowered_default = lower_expression(default_expr)?;
+                let lowered_default = lower_expression(default_expr, ctx)?;
                 defaults[defaults_start + i] = Some(lowered_default);
             }
 
-            let body: Result<Vec<IRStmt>, LoweringError> =
-                body.iter().map(lower_statement).collect();
+            let body = lower_block(body, ctx)?;
             Ok(IRStmt::FunctionDef {
                 name: name.to_string(),
                 params,
                 defaults,
-                body: body?,
+                body,
             })
         }
         ast::Stmt::Return(ast::StmtReturn { value, .. }) => {
             let value = value
                 .as_ref()
                 .ok_or_else(|| LoweringError::UnsupportedStatement(Box::new(stmt.clone())))?;
-            let expr = lower_expression(value)?;
+            let expr = lower_expression(value, ctx)?;
             Ok(IRStmt::Return(expr))
         }
         ast::Stmt::If(ast::StmtIf {
             test, body, orelse, ..
         }) => {
-            let condition = lower_expression(test)?;
-            let then_body: Result<Vec<IRStmt>, LoweringError> =
-                body.iter().map(lower_statement).collect();
+            let condition = lower_expression(test, ctx)?;
+            let then_body = lower_block(body, ctx)?;
 
             // Handle else clause (including elif, which is represented as a nested If in orelse)
             let else_body = if !orelse.is_empty() {
-                let else_stmts: Result<Vec<IRStmt>, LoweringError> =
-                    orelse.iter().map(lower_statement).collect();
-                else_stmts?
+                lower_block(orelse, ctx)?
             } else {
                 Vec::new()
             };
 
             Ok(IRStmt::If {
                 condition,
-                then_body: then_body?,
+                then_body,
                 else_body,
             })
         }
         ast::Stmt::While(ast::StmtWhile { test, body, .. }) => {
-            let condition = lower_expression(test)?;
-            let body: Result<Vec<IRStmt>, LoweringError> =
-                body.iter().map(lower_statement).collect();
-            Ok(IRStmt::While {
-                condition,
-                body: body?,
-            })
+            let condition = lower_expression(test, ctx)?;
+            let body = lower_block(body, ctx)?;
+            Ok(IRStmt::While { condition, body })
         }
         ast::Stmt::AugAssign(ast::StmtAugAssign {
             target, op, value, ..
@@ -130,7 +195,7 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
             // Desugar augmented assignment: x += y => x = x + y
             if let ast::Expr::Name(ast::ExprName { id, .. }) = target.as_ref() {
                 let current_value = IRExpr::Variable(id.to_string());
-                let new_value = lower_expression(value)?;
+                let new_value = lower_expression(value, ctx)?;
                 let op = lower_binop(op)?;
                 let result = IRExpr::BinaryOp {
                     op,
@@ -167,10 +232,13 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                         // Handle range(end) or range(start, end)
                         let (start, end) = if args.len() == 1 {
                             // range(end) - start from 0
-                            (IRExpr::Constant(0), lower_expression(&args[0])?)
+                            (IRExpr::Constant(0), lower_expression(&args[0], ctx)?)
                         } else if args.len() == 2 {
                             // range(start, end)
-                            (lower_expression(&args[0])?, lower_expression(&args[1])?)
+                            (
+                                lower_expression(&args[0], ctx)?,
+                                lower_expression(&args[1], ctx)?,
+                            )
                         } else {
                             // range with step is not supported
                             return Err(LoweringError::UnsupportedStatement(Box::new(
@@ -179,14 +247,13 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
                         };
 
                         // Lower the loop body
-                        let body: Result<Vec<IRStmt>, LoweringError> =
-                            body.iter().map(lower_statement).collect();
+                        let body = lower_block(body, ctx)?;
 
                         return Ok(IRStmt::For {
                             var,
                             start,
                             end,
-                            body: body?,
+                            body,
                         });
                     }
                 }
@@ -197,8 +264,16 @@ fn lower_statement(stmt: &ast::Stmt) -> Result<IRStmt, LoweringError> {
     }
 }
 
+/// Lowers a list of expressions (e.g. call arguments), threading the context.
+fn lower_expressions(
+    exprs: &[ast::Expr],
+    ctx: &LoweringContext,
+) -> Result<Vec<IRExpr>, LoweringError> {
+    exprs.iter().map(|e| lower_expression(e, ctx)).collect()
+}
+
 /// Lowers a single expression.
-fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
+fn lower_expression(expr: &ast::Expr, ctx: &LoweringContext) -> Result<IRExpr, LoweringError> {
     match expr {
         ast::Expr::Constant(ast::ExprConstant { value, .. }) => match value {
             ast::Constant::Int(n) => Ok(IRExpr::Constant(n.to_i64().unwrap())),
@@ -211,8 +286,8 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
         ast::Expr::BinOp(ast::ExprBinOp {
             left, op, right, ..
         }) => {
-            let left = lower_expression(left)?;
-            let right = lower_expression(right)?;
+            let left = lower_expression(left, ctx)?;
+            let right = lower_expression(right, ctx)?;
             let op = lower_binop(op)?;
             Ok(IRExpr::BinaryOp {
                 op,
@@ -220,36 +295,27 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                 right: Box::new(right),
             })
         }
-        ast::Expr::Call(ast::ExprCall { func, args, .. }) => {
-            if let ast::Expr::Name(ast::ExprName { id, .. }) = func.as_ref() {
-                // Don't handle print here - it's handled as a statement
-                if id == "print" {
-                    return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
+        ast::Expr::Call(ast::ExprCall { func, args, .. }) => lower_call(expr, func, args, ctx),
+        ast::Expr::Attribute(ast::ExprAttribute { value, attr, .. }) => {
+            // `module.name` (a module attribute, e.g. `np.pi`) resolves to a
+            // module-level lookup; any other `value.attr` is a plain attribute
+            // access on a runtime value.
+            if let ast::Expr::Name(ast::ExprName { id, .. }) = value.as_ref() {
+                if let Some(module) = ctx.module_for_alias(id) {
+                    // Model a module constant as a zero-argument module call so
+                    // codegen has a single dispatch path for module members.
+                    return Ok(IRExpr::ModuleCall {
+                        module: module.to_string(),
+                        func: attr.to_string(),
+                        args: Vec::new(),
+                    });
                 }
-                // Handle input() call
-                if id == "input" {
-                    if !args.is_empty() {
-                        return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
-                    }
-                    return Ok(IRExpr::Input);
-                }
-                // Handle len() call
-                if id == "len" {
-                    if args.len() != 1 {
-                        return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
-                    }
-                    let arg = lower_expression(&args[0])?;
-                    return Ok(IRExpr::Len(Box::new(arg)));
-                }
-                let args: Result<Vec<IRExpr>, LoweringError> =
-                    args.iter().map(lower_expression).collect();
-                Ok(IRExpr::Call {
-                    func: id.to_string(),
-                    args: args?,
-                })
-            } else {
-                Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())))
             }
+            let value = lower_expression(value, ctx)?;
+            Ok(IRExpr::Attribute {
+                value: Box::new(value),
+                attr: attr.to_string(),
+            })
         }
         ast::Expr::Compare(ast::ExprCompare {
             left,
@@ -262,8 +328,8 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
                 return Err(LoweringError::InvalidComparison);
             }
 
-            let left = lower_expression(left)?;
-            let right = lower_expression(&comparators[0])?;
+            let left = lower_expression(left, ctx)?;
+            let right = lower_expression(&comparators[0], ctx)?;
             let op = match &ops[0] {
                 ast::CmpOp::Eq => CmpOp::Eq,
                 ast::CmpOp::NotEq => CmpOp::NotEq,
@@ -281,7 +347,7 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
             })
         }
         ast::Expr::UnaryOp(ast::ExprUnaryOp { op, operand, .. }) => {
-            let operand = lower_expression(operand)?;
+            let operand = lower_expression(operand, ctx)?;
             let op = match op {
                 ast::UnaryOp::Invert => UnaryOp::Invert,
                 ast::UnaryOp::Not => UnaryOp::Not,
@@ -294,16 +360,83 @@ fn lower_expression(expr: &ast::Expr) -> Result<IRExpr, LoweringError> {
             })
         }
         ast::Expr::List(ast::ExprList { elts, .. }) => {
-            let elements: Result<Vec<IRExpr>, LoweringError> =
-                elts.iter().map(lower_expression).collect();
-            Ok(IRExpr::List(elements?))
+            Ok(IRExpr::List(lower_expressions(elts, ctx)?))
         }
         ast::Expr::Subscript(ast::ExprSubscript { value, slice, .. }) => {
-            let list = lower_expression(value)?;
-            let index = lower_expression(slice)?;
+            let list = lower_expression(value, ctx)?;
+            let index = lower_expression(slice, ctx)?;
             Ok(IRExpr::Index {
                 list: Box::new(list),
                 index: Box::new(index),
+            })
+        }
+        _ => Err(LoweringError::UnsupportedExpression(Box::new(expr.clone()))),
+    }
+}
+
+/// Lowers a call expression, distinguishing the several call shapes Rusthon
+/// understands:
+///
+/// - `name(...)`         → built-in (`input`/`len`) or a user function call
+/// - `module.func(...)`  → [`IRExpr::ModuleCall`] when `module` is an import alias
+/// - `receiver.meth(...)`→ [`IRExpr::MethodCall`] otherwise
+fn lower_call(
+    expr: &ast::Expr,
+    func: &ast::Expr,
+    args: &[ast::Expr],
+    ctx: &LoweringContext,
+) -> Result<IRExpr, LoweringError> {
+    match func {
+        ast::Expr::Name(ast::ExprName { id, .. }) => {
+            // Don't handle print here - it's handled as a statement
+            if id == "print" {
+                return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
+            }
+            // Handle input() call
+            if id == "input" {
+                if !args.is_empty() {
+                    return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
+                }
+                return Ok(IRExpr::Input);
+            }
+            // Handle len() call
+            if id == "len" {
+                if args.len() != 1 {
+                    return Err(LoweringError::UnsupportedExpression(Box::new(expr.clone())));
+                }
+                let arg = lower_expression(&args[0], ctx)?;
+                return Ok(IRExpr::Len(Box::new(arg)));
+            }
+            // A name bound by `from <module> import <name>` calls into that module.
+            if let Some((module, orig)) = ctx.from_imports.get(id.as_str()) {
+                return Ok(IRExpr::ModuleCall {
+                    module: module.clone(),
+                    func: orig.clone(),
+                    args: lower_expressions(args, ctx)?,
+                });
+            }
+            Ok(IRExpr::Call {
+                func: id.to_string(),
+                args: lower_expressions(args, ctx)?,
+            })
+        }
+        ast::Expr::Attribute(ast::ExprAttribute { value, attr, .. }) => {
+            // `alias.func(...)` where `alias` names an imported module is a
+            // module function call; anything else is a method call on a value.
+            if let ast::Expr::Name(ast::ExprName { id, .. }) = value.as_ref() {
+                if let Some(module) = ctx.module_for_alias(id) {
+                    return Ok(IRExpr::ModuleCall {
+                        module: module.to_string(),
+                        func: attr.to_string(),
+                        args: lower_expressions(args, ctx)?,
+                    });
+                }
+            }
+            let receiver = lower_expression(value, ctx)?;
+            Ok(IRExpr::MethodCall {
+                receiver: Box::new(receiver),
+                method: attr.to_string(),
+                args: lower_expressions(args, ctx)?,
             })
         }
         _ => Err(LoweringError::UnsupportedExpression(Box::new(expr.clone()))),

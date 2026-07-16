@@ -20,6 +20,7 @@ Rusthon supports a useful subset of Python focused on:
 | Booleans | ✅ Full (True/False) | `/language-features/data-types#booleans` |
 | Strings | ✅ Concatenation, len() | `/language-features/data-types#strings` |
 | Lists | ✅ Fixed-size, indexing | `/language-features/data-types#lists` |
+| NumPy arrays | ✅ Subset (1-D float64) | `/language-features/numpy` |
 | Dictionaries | ❌ Not supported | See `/limitations` |
 | **Operators** |  |  |
 | Arithmetic | ✅ Full (+, -, *, /, %) | `/language-features/operators#arithmetic` |
@@ -171,9 +172,23 @@ print(power(5))          # 25 (5^2)
 print(power(5, 3))       # 125 (5^3)
 ```
 
+### NumPy (compiled subset)
+```python
+import numpy as np
+
+a = np.array([1.0, 2.0, 3.0, 4.0])
+b = np.array([10.0, 20.0, 30.0, 40.0])
+
+c = a + b            # element-wise (auto-vectorized): [11, 22, 33, 44]
+print(c[0])          # 11.0
+print(c.sum())       # 110.0
+print((2 * a).mean())# scalar broadcast + reduction: 5.0
+```
+
 ## Documentation Sections
 
 - [Data Types](/language-features/data-types) - Integers, floats, booleans, strings
+- [NumPy](/language-features/numpy) - Compiled NumPy array subset
 - [Operators](/language-features/operators) - All supported operators
 - [Variables](/language-features/variables) - Assignment and scoping
 - [Functions](/language-features/functions) - Definitions and calls

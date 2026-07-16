@@ -73,6 +73,31 @@ if x:
 
 ## Medium Term
 
+### NumPy (compiled subset)
+
+A native, compiled subset of NumPy — no CPython, no `libnumpy`. Arrays are
+unboxed, typed, contiguous buffers whose element-wise loops auto-vectorize.
+
+**Phase 1 — 1-D float64 arrays** ✅ Done
+```python
+import numpy as np
+a = np.array([1.0, 2.0, 3.0, 4.0])
+b = a + 1                 # element-wise + scalar broadcasting (auto-vectorized)
+print(a.sum(), a.mean(), a[0], len(a), a.size)
+# constructors: np.array / np.zeros / np.ones / np.arange
+# constants:    np.pi / np.e
+```
+Delivered via a generic module system (`import` resolves aliases; codegen owns
+the module registry) and a pay-as-you-go "may-be-array" analysis so scalar code
+is unchanged.
+
+**Next phases** 🔮 Planned
+- Additional dtypes (`int64`) tracked in the array header.
+- Slicing (`a[1:3]`), item assignment (`a[0] = x`), boolean/fancy indexing.
+- Arrays across user-defined function parameters and return values.
+- Multi-dimensional arrays (`ndim`/shape/strides), `reshape`, `.T`.
+- Linear algebra (`np.dot`, `@`), more reductions/ufuncs, array printing.
+
 ### Data Structures
 
 **Lists (Fixed Size)**

@@ -40,6 +40,7 @@ const TAG_INT: u64 = 0;
 const TAG_BOOL: u64 = 1;
 const TAG_STRING: u64 = 2;
 const TAG_LIST: u64 = 3;
+const TAG_ARRAY: u64 = 4;
 
 // Legacy type tags (for compatibility with print dispatch logic)
 pub const TYPE_TAG_INT: u8 = 0;
@@ -183,6 +184,48 @@ impl<'ctx> ValueManager<'ctx> {
             .unwrap();
         builder
             .build_or(with_tag, payload, "pyobject_list")
+            .unwrap()
+    }
+
+    /// Creates a PyObject value from an ndarray pointer using NaN-boxing.
+    ///
+    /// The pointer refers to the array header + data buffer laid out by
+    /// `generators::ndarray`. Boxing is identical to lists apart from the tag.
+    pub fn create_array(&self, builder: &Builder<'ctx>, ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
+        let ptr_as_int = builder
+            .build_ptr_to_int(ptr, self.context.i64_type(), "arr_ptr_to_int")
+            .unwrap();
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload = builder
+            .build_and(ptr_as_int, payload_mask, "arr_ptr_payload")
+            .unwrap();
+        let tag_shifted = self.context.i64_type().const_int(TAG_ARRAY << 48, false);
+        let qnan_const = self.context.i64_type().const_int(QNAN, false);
+        let with_tag = builder
+            .build_or(qnan_const, tag_shifted, "with_tag")
+            .unwrap();
+        builder
+            .build_or(with_tag, payload, "pyobject_array")
+            .unwrap()
+    }
+
+    /// Extracts an ndarray base pointer from a PyObject.
+    /// Assumes the PyObject has an ARRAY tag.
+    pub fn extract_array_ptr(
+        &self,
+        builder: &Builder<'ctx>,
+        pyobject: IntValue<'ctx>,
+    ) -> PointerValue<'ctx> {
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload = builder
+            .build_and(pyobject, payload_mask, "extract_arr_payload")
+            .unwrap();
+        builder
+            .build_int_to_ptr(
+                payload,
+                self.context.ptr_type(inkwell::AddressSpace::default()),
+                "payload_to_arr_ptr",
+            )
             .unwrap()
     }
 
@@ -354,6 +397,25 @@ impl<'ctx> ValueManager<'ctx> {
             .build_select(is_float, float_result, nanboxed_result, "pyobject")
             .unwrap()
             .into_int_value()
+    }
+
+    /// Checks if a PyObject is an ndarray.
+    ///
+    /// Arrays and lists share the pointer-in-payload shape and differ only by
+    /// tag, so this compares the full NaN + tag bits directly. It is a small,
+    /// self-contained test emitted only where array handling is needed, which
+    /// keeps `extract_tag` (used pervasively) untouched by array support.
+    pub fn is_array(&self, builder: &Builder<'ctx>, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
+        // (pyobject & (QNAN | TAG_MASK)) == (QNAN | (TAG_ARRAY << 48))
+        let mask = self.context.i64_type().const_int(QNAN | TAG_MASK, false);
+        let expected = self
+            .context
+            .i64_type()
+            .const_int(QNAN | (TAG_ARRAY << 48), false);
+        let masked = builder.build_and(pyobject, mask, "array_tag_bits").unwrap();
+        builder
+            .build_int_compare(inkwell::IntPredicate::EQ, masked, expected, "is_array")
+            .unwrap()
     }
 
     /// Checks if a PyObject is a float (not NaN-boxed)

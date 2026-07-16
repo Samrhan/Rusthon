@@ -64,6 +64,8 @@ Python Source → Parser → AST → Lowering → IR → CodeGen → LLVM IR →
   - `compiler/runtime.rs` — external C functions and format strings
   - `compiler/generators/expression.rs` — expression compilation
   - `compiler/generators/statement.rs` — statement compilation
+  - `compiler/generators/module.rs` — module/method/attribute dispatch (e.g. `np.array`, `arr.sum()`)
+  - `compiler/generators/ndarray.rs` — NumPy `ndarray` codegen (unboxed float64 buffers, element-wise loops)
 
 #### 4. **Optimization** (LLVM 18 new pass manager)
 - Pipeline: `default<O2>`
@@ -92,6 +94,7 @@ Tagged: [1][11111111111][1][ tag (3 bits) ][ payload (48 bits) ]
 - `TAG_BOOL = 1`: boolean (1-bit payload)
 - `TAG_STRING = 2`: string pointer (48-bit)
 - `TAG_LIST = 3`: list pointer (48-bit)
+- `TAG_ARRAY = 4`: NumPy `ndarray` pointer (48-bit); detected via `ValueManager::is_array`
 - Floats: no tag (stored as canonical float64)
 
 **Constants** (`compiler/values.rs`):
@@ -148,6 +151,8 @@ Value:   3         10          20          30
 | `compiler/runtime.rs` | Runtime intrinsics | `Runtime`, `FormatStrings` (printf/scanf/malloc/…) |
 | `compiler/generators/expression.rs` | Expression codegen | `compile_binary_op`, `compile_comparison`, list/index/len/call helpers |
 | `compiler/generators/statement.rs` | Statement codegen | Statement compilation helpers |
+| `compiler/generators/module.rs` | Module/method/attribute dispatch | `compile_module_call`, `compile_method_call`, `compile_attribute` |
+| `compiler/generators/ndarray.rs` | NumPy ndarray codegen | `from_list`, `zeros`/`ones`/`arange`, `binop`, `reduce_sum`, `mean` |
 | `tagged_pointer.rs` | NaN-boxing reference impl | `box_int()`, `unbox_int()`, type discrimination + unit tests |
 | `error.rs` | Error types & reporting | `CodeGenError`, `LoweringError`, ariadne diagnostics |
 
@@ -169,12 +174,13 @@ Value:   3         10          20          30
 | `integration.rs` | End-to-end scenarios | 4 |
 | `lists.rs` | List operations | 6 |
 | `minimal_test.rs` | Smoke test | 1 |
+| `numpy.rs` | NumPy subset (arrays, module system) | 10 |
 | `precedence.rs` | Operator precedence | 18 |
 | `strings.rs` | String operations | 28 |
 | `unary.rs` | Unary operators | 15 |
 | `variables.rs` | Variable assignment | 3 |
 
-**Total**: 184 tests
+**Total**: 194 tests
 
 ### Documentation (`docs/`)
 

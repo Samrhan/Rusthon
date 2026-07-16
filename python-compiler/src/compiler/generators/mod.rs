@@ -11,4 +11,6 @@
 //! - `control`: Control flow compilation (to be added)
 
 pub mod expression;
+pub mod module;
+pub mod ndarray;
 pub mod statement;

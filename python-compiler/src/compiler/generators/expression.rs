@@ -17,6 +17,7 @@
 
 use crate::ast::{BinOp, CmpOp, IRExpr, UnaryOp};
 use crate::codegen::{CodeGenError, Compiler};
+use crate::compiler::generators::ndarray;
 use crate::compiler::values::{TYPE_TAG_FLOAT, TYPE_TAG_INT, TYPE_TAG_LIST, TYPE_TAG_STRING};
 use inkwell::values::IntValue;
 use inkwell::FloatPredicate;
@@ -311,27 +312,95 @@ pub fn compile_list<'ctx>(
     Ok(compiler.create_pyobject_list(list_ptr, list_len))
 }
 
-/// Compiles a list indexing expression `list[index]`
+/// Compiles an indexing expression `obj[index]`.
+///
+/// When an operand might be a NumPy array, indexing dispatches on the runtime
+/// tag: arrays load a raw `f64` element and box it as a float, while lists load
+/// an already-boxed element. For definitely-scalar receivers only the list path
+/// is emitted, so list indexing is unchanged.
 pub fn compile_index<'ctx>(
     compiler: &mut Compiler<'ctx>,
     list: &IRExpr,
     index: &IRExpr,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
-    let list_obj = compiler.compile_expression(list)?;
+    let array_possible = compiler.expr_may_be_array(list);
+    let obj = compiler.compile_expression(list)?;
     let index_obj = compiler.compile_expression(index)?;
 
-    // Extract the list pointer and length from the PyObject
-    let (list_ptr, _list_len) = compiler.extract_list_ptr_and_len(list_obj);
+    if !array_possible {
+        // List-only path (unchanged from before arrays existed).
+        let (list_ptr, _list_len) = compiler.extract_list_ptr_and_len(obj);
+        let index_payload = compiler.extract_payload(index_obj);
+        let index_int = compiler
+            .builder
+            .build_float_to_signed_int(index_payload, compiler.context.i64_type(), "index_int")
+            .unwrap();
+        let adjusted_index = compiler
+            .builder
+            .build_int_add(
+                index_int,
+                compiler.context.i64_type().const_int(1, false),
+                "adjusted_index",
+            )
+            .unwrap();
+        let pyobject_type = compiler.create_pyobject_type();
+        let elem_ptr = unsafe {
+            compiler
+                .builder
+                .build_in_bounds_gep(pyobject_type, list_ptr, &[adjusted_index], "elem_ptr")
+                .unwrap()
+        };
+        let elem = compiler
+            .builder
+            .build_load(pyobject_type, elem_ptr, "elem")
+            .unwrap()
+            .into_int_value();
+        return Ok(elem);
+    }
 
-    // Extract the index value
-    let index_payload = compiler.extract_payload(index_obj);
-    let index_int = compiler
+    let is_array = compiler.is_array(obj);
+
+    let current_fn = compiler
         .builder
-        .build_float_to_signed_int(index_payload, compiler.context.i64_type(), "index_int")
+        .get_insert_block()
+        .unwrap()
+        .get_parent()
+        .unwrap();
+    let array_bb = compiler
+        .context
+        .append_basic_block(current_fn, "index_array");
+    let list_bb = compiler
+        .context
+        .append_basic_block(current_fn, "index_list");
+    let merge_bb = compiler
+        .context
+        .append_basic_block(current_fn, "index_merge");
+
+    compiler
+        .builder
+        .build_conditional_branch(is_array, array_bb, list_bb)
         .unwrap();
 
-    // Add 1 to the index to skip the length header
-    // List layout: [length: i64][element_0: i64]...[element_n: i64]
+    // Array path: load the raw element and box it as a float.
+    compiler.builder.position_at_end(array_bb);
+    let array_result = ndarray::index_load(compiler, obj, index_obj);
+    let array_pred = compiler.builder.get_insert_block().unwrap();
+    compiler
+        .builder
+        .build_unconditional_branch(merge_bb)
+        .unwrap();
+
+    // List path: elements are boxed and start after the length header.
+    compiler.builder.position_at_end(list_bb);
+    let (list_ptr, _list_len) = compiler.extract_list_ptr_and_len(obj);
+    let index_int = compiler
+        .builder
+        .build_float_to_signed_int(
+            compiler.extract_payload(index_obj),
+            compiler.context.i64_type(),
+            "index_int",
+        )
+        .unwrap();
     let adjusted_index = compiler
         .builder
         .build_int_add(
@@ -340,8 +409,6 @@ pub fn compile_index<'ctx>(
             "adjusted_index",
         )
         .unwrap();
-
-    // Get the element at the adjusted index
     let pyobject_type = compiler.create_pyobject_type();
     let elem_ptr = unsafe {
         compiler
@@ -349,19 +416,46 @@ pub fn compile_index<'ctx>(
             .build_in_bounds_gep(pyobject_type, list_ptr, &[adjusted_index], "elem_ptr")
             .unwrap()
     };
-
-    // Load and return the element
-    let elem = compiler
+    let list_result = compiler
         .builder
         .build_load(pyobject_type, elem_ptr, "elem")
         .unwrap()
         .into_int_value();
+    let list_pred = compiler.builder.get_insert_block().unwrap();
+    compiler
+        .builder
+        .build_unconditional_branch(merge_bb)
+        .unwrap();
 
-    Ok(elem)
+    // Merge.
+    compiler.builder.position_at_end(merge_bb);
+    let pyobject_type = compiler.create_pyobject_type();
+    let phi = compiler
+        .builder
+        .build_phi(pyobject_type, "index_result")
+        .unwrap();
+    phi.add_incoming(&[(&array_result, array_pred), (&list_result, list_pred)]);
+    Ok(phi.as_basic_value().into_int_value())
 }
 
-/// Compiles a len() expression for strings and lists
+/// Compiles a `len()` expression.
+///
+/// Dispatches to an array-aware implementation only when the argument might be
+/// an array; otherwise the original string/list implementation is used verbatim
+/// so `len()` on scalars, strings and lists is unchanged.
 pub fn compile_len<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arg: &IRExpr,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    if compiler.expr_may_be_array(arg) {
+        compile_len_array_aware(compiler, arg)
+    } else {
+        compile_len_scalar(compiler, arg)
+    }
+}
+
+/// `len()` for strings and lists (the implementation predating array support).
+fn compile_len_scalar<'ctx>(
     compiler: &mut Compiler<'ctx>,
     arg: &IRExpr,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
@@ -483,6 +577,150 @@ pub fn compile_len<'ctx>(
     Ok(phi.as_basic_value().into_int_value())
 }
 
+/// `len()` extended to report an array's element count.
+fn compile_len_array_aware<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arg: &IRExpr,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let arg_obj = compiler.compile_expression(arg)?;
+    let arg_tag = compiler.extract_tag(arg_obj);
+
+    // Check if the argument is a string or list
+    let string_tag_const = compiler
+        .context
+        .i64_type()
+        .const_int(TYPE_TAG_STRING as u64, false);
+    let list_tag_const = compiler
+        .context
+        .i64_type()
+        .const_int(TYPE_TAG_LIST as u64, false);
+
+    let is_string = compiler
+        .builder
+        .build_int_compare(
+            inkwell::IntPredicate::EQ,
+            arg_tag,
+            string_tag_const,
+            "is_string",
+        )
+        .unwrap();
+    let is_list = compiler
+        .builder
+        .build_int_compare(
+            inkwell::IntPredicate::EQ,
+            arg_tag,
+            list_tag_const,
+            "is_list",
+        )
+        .unwrap();
+    let is_array = compiler.is_array(arg_obj);
+
+    // Get current function for creating basic blocks
+    let current_fn = compiler
+        .builder
+        .get_insert_block()
+        .unwrap()
+        .get_parent()
+        .unwrap();
+
+    let string_len_block = compiler
+        .context
+        .append_basic_block(current_fn, "string_len");
+    let list_len_block = compiler.context.append_basic_block(current_fn, "list_len");
+    let array_len_block = compiler.context.append_basic_block(current_fn, "array_len");
+    let other_len_block = compiler.context.append_basic_block(current_fn, "other_len");
+    let merge_block = compiler.context.append_basic_block(current_fn, "len_merge");
+
+    // Arrays must be checked first: `extract_tag` does not distinguish arrays
+    // from lists (both fall in the pointer-tag family), so the dedicated
+    // `is_array` predicate has to take priority over the tag-based checks.
+    let check_string_block = compiler
+        .context
+        .append_basic_block(current_fn, "check_string");
+    let check_list_block = compiler
+        .context
+        .append_basic_block(current_fn, "check_list");
+    compiler
+        .builder
+        .build_conditional_branch(is_array, array_len_block, check_string_block)
+        .unwrap();
+
+    compiler.builder.position_at_end(check_string_block);
+    compiler
+        .builder
+        .build_conditional_branch(is_string, string_len_block, check_list_block)
+        .unwrap();
+
+    compiler.builder.position_at_end(check_list_block);
+    compiler
+        .builder
+        .build_conditional_branch(is_list, list_len_block, other_len_block)
+        .unwrap();
+
+    // String length block
+    compiler.builder.position_at_end(string_len_block);
+    let str_ptr = compiler.extract_string_ptr(arg_obj);
+    let strlen_fn = compiler.runtime.add_strlen(&compiler.module);
+    let len_result = compiler
+        .builder
+        .build_call(strlen_fn, &[str_ptr.into()], "strlen")
+        .unwrap();
+    let len_int = match len_result.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(value) => value.into_int_value(),
+        _ => {
+            return Err(CodeGenError::UndefinedVariable(
+                "strlen did not return a value".to_string(),
+            ))
+        }
+    };
+    let string_len_result = compiler.create_pyobject_int(len_int);
+    compiler
+        .builder
+        .build_unconditional_branch(merge_block)
+        .unwrap();
+
+    // List length block
+    compiler.builder.position_at_end(list_len_block);
+    let (_list_ptr, list_len) = compiler.extract_list_ptr_and_len(arg_obj);
+    let list_len_result = compiler.create_pyobject_int(list_len);
+    compiler
+        .builder
+        .build_unconditional_branch(merge_block)
+        .unwrap();
+
+    // Array length block: len(array) is its element count (size header field)
+    compiler.builder.position_at_end(array_len_block);
+    let array_len_result = ndarray::size(compiler, arg_obj);
+    compiler
+        .builder
+        .build_unconditional_branch(merge_block)
+        .unwrap();
+
+    // Other types - return 0 for now
+    compiler.builder.position_at_end(other_len_block);
+    let zero_int = compiler.context.i64_type().const_int(0, false);
+    let other_len_result = compiler.create_pyobject_int(zero_int);
+    compiler
+        .builder
+        .build_unconditional_branch(merge_block)
+        .unwrap();
+
+    // Merge block
+    compiler.builder.position_at_end(merge_block);
+    let pyobject_type = compiler.create_pyobject_type();
+    let phi = compiler
+        .builder
+        .build_phi(pyobject_type, "len_result")
+        .unwrap();
+    phi.add_incoming(&[
+        (&string_len_result, string_len_block),
+        (&list_len_result, list_len_block),
+        (&array_len_result, array_len_block),
+        (&other_len_result, other_len_block),
+    ]);
+    Ok(phi.as_basic_value().into_int_value())
+}
+
 // ============================================================================
 // Input/Output Operations
 // ============================================================================
@@ -586,16 +824,101 @@ pub fn compile_call<'ctx>(
 // Binary Operations
 // ============================================================================
 
-/// Compiles a binary operation expression (arithmetic, bitwise, string concatenation)
+/// Compiles a binary operation expression.
+///
+/// For the arithmetic operators, either operand may turn out to be a NumPy
+/// array at runtime, in which case the operation is element-wise (with scalar
+/// broadcasting). Because Rusthon is dynamically typed, "is it an array?" is a
+/// runtime test: we branch to an array path or the ordinary scalar path and
+/// merge the results with a phi node. Bitwise operators are scalar-only and
+/// skip this dispatch entirely.
 pub fn compile_binary_op<'ctx>(
     compiler: &mut Compiler<'ctx>,
     op: &BinOp,
     left: &IRExpr,
     right: &IRExpr,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
+    // Emit the array-dispatch only when an operand might actually be an array;
+    // scalar-only code then generates exactly as it did before arrays existed.
+    let array_possible = matches!(
+        op,
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
+    ) && (compiler.expr_may_be_array(left)
+        || compiler.expr_may_be_array(right));
+
     let lhs_obj = compiler.compile_expression(left)?;
     let rhs_obj = compiler.compile_expression(right)?;
 
+    if array_possible {
+        let lhs_is_array = compiler.is_array(lhs_obj);
+        let rhs_is_array = compiler.is_array(rhs_obj);
+        let any_array = compiler
+            .builder
+            .build_or(lhs_is_array, rhs_is_array, "any_array")
+            .unwrap();
+
+        let current_fn = compiler
+            .builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap();
+        let array_bb = compiler
+            .context
+            .append_basic_block(current_fn, "binop_array");
+        let scalar_bb = compiler
+            .context
+            .append_basic_block(current_fn, "binop_scalar");
+        let merge_bb = compiler
+            .context
+            .append_basic_block(current_fn, "binop_merge");
+
+        compiler
+            .builder
+            .build_conditional_branch(any_array, array_bb, scalar_bb)
+            .unwrap();
+
+        // Array path.
+        compiler.builder.position_at_end(array_bb);
+        let array_result =
+            ndarray::binop(compiler, op, lhs_obj, rhs_obj, lhs_is_array, rhs_is_array)?;
+        let array_pred = compiler.builder.get_insert_block().unwrap();
+        compiler
+            .builder
+            .build_unconditional_branch(merge_bb)
+            .unwrap();
+
+        // Scalar path.
+        compiler.builder.position_at_end(scalar_bb);
+        let scalar_result = compile_scalar_binary_op(compiler, op, lhs_obj, rhs_obj)?;
+        let scalar_pred = compiler.builder.get_insert_block().unwrap();
+        compiler
+            .builder
+            .build_unconditional_branch(merge_bb)
+            .unwrap();
+
+        // Merge.
+        compiler.builder.position_at_end(merge_bb);
+        let pyobject_type = compiler.create_pyobject_type();
+        let phi = compiler
+            .builder
+            .build_phi(pyobject_type, "binop_result")
+            .unwrap();
+        phi.add_incoming(&[(&array_result, array_pred), (&scalar_result, scalar_pred)]);
+        return Ok(phi.as_basic_value().into_int_value());
+    }
+
+    compile_scalar_binary_op(compiler, op, lhs_obj, rhs_obj)
+}
+
+/// Compiles a binary operation on already-compiled scalar operands
+/// (arithmetic, bitwise, string concatenation).
+fn compile_scalar_binary_op<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    op: &BinOp,
+    lhs_obj: IntValue<'ctx>,
+    rhs_obj: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>, CodeGenError> {
     // Extract tags to check types
     let lhs_tag = compiler.extract_tag(lhs_obj);
     let rhs_tag = compiler.extract_tag(rhs_obj);

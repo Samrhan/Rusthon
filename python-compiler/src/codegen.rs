@@ -1,5 +1,5 @@
-use crate::ast::{IRExpr, IRStmt};
-use crate::compiler::generators::{expression, statement};
+use crate::ast::{BinOp, IRExpr, IRStmt};
+use crate::compiler::generators::{expression, module, statement};
 use crate::compiler::runtime::{FormatStrings, Runtime};
 use crate::compiler::values::{ValueManager, TYPE_TAG_INT, TYPE_TAG_STRING};
 use inkwell::builder::Builder;
@@ -10,7 +10,7 @@ use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, Targe
 use inkwell::values::{FloatValue, FunctionValue, IntValue, PointerValue};
 use inkwell::FloatPredicate;
 use inkwell::OptimizationLevel;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Once;
 use thiserror::Error;
 
@@ -22,6 +22,8 @@ pub enum CodeGenError {
     ModuleVerification(String),
     #[error("Undefined variable: {0}")]
     UndefinedVariable(String),
+    #[error("Unsupported operation: {0}")]
+    UnsupportedFeature(String),
 }
 
 pub struct Compiler<'ctx> {
@@ -29,6 +31,12 @@ pub struct Compiler<'ctx> {
     pub(crate) builder: Builder<'ctx>,
     pub(crate) module: Module<'ctx>,
     pub(crate) variables: HashMap<String, PointerValue<'ctx>>,
+    // Names of variables that may hold a NumPy array in the current scope.
+    // This drives *pay-as-you-go* array support: the runtime array-dispatch for
+    // arithmetic, indexing and len() is emitted only where an operand might be
+    // an array, so scalar-only code compiles exactly as it did before arrays
+    // existed. It is a conservative "may" analysis (see `expr_may_be_array`).
+    pub(crate) maybe_array_vars: HashSet<String>,
     pub(crate) functions: HashMap<String, FunctionValue<'ctx>>,
     pub(crate) function_defaults: HashMap<String, Vec<Option<IRExpr>>>,
     // Stack of (continue_target, break_target) basic blocks for nested loops
@@ -61,6 +69,7 @@ impl<'ctx> Compiler<'ctx> {
             builder,
             module,
             variables: HashMap::new(),
+            maybe_array_vars: HashSet::new(),
             functions: HashMap::new(),
             function_defaults: HashMap::new(),
             loop_stack: Vec::new(),
@@ -127,6 +136,17 @@ impl<'ctx> Compiler<'ctx> {
             .extract_list_ptr_and_len(&self.builder, pyobject)
     }
 
+    /// Creates a PyObject value from an ndarray base pointer using NaN-boxing.
+    pub(crate) fn create_pyobject_array(&self, ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
+        self.values.create_array(&self.builder, ptr)
+    }
+
+    /// Extracts an ndarray base pointer from a PyObject.
+    /// Assumes the PyObject has an ARRAY tag.
+    pub(crate) fn extract_array_ptr(&self, pyobject: IntValue<'ctx>) -> PointerValue<'ctx> {
+        self.values.extract_array_ptr(&self.builder, pyobject)
+    }
+
     /// Reconstructs a PyObject from a tag and payload
     /// tag: IntValue (i64) representing the type tag (0=INT, 1=FLOAT, 2=BOOL, 3=STRING, 4=LIST)
     /// payload: FloatValue representing the payload as f64
@@ -144,6 +164,11 @@ impl<'ctx> Compiler<'ctx> {
     #[allow(dead_code)]
     pub(crate) fn is_float(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
         self.values.is_float(&self.builder, pyobject)
+    }
+
+    /// Checks if a PyObject is an ndarray (i1 result).
+    pub(crate) fn is_array(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
+        self.values.is_array(&self.builder, pyobject)
     }
 
     /// Extracts the tag from a NaN-boxed PyObject
@@ -544,6 +569,15 @@ impl<'ctx> Compiler<'ctx> {
             IRExpr::UnaryOp { op, operand } => expression::compile_unary_op(self, op, operand),
             IRExpr::List(elements) => expression::compile_list(self, elements),
             IRExpr::Index { list, index } => expression::compile_index(self, list, index),
+            IRExpr::Attribute { value, attr } => module::compile_attribute(self, value, attr),
+            IRExpr::ModuleCall { module, func, args } => {
+                module::compile_module_call(self, module, func, args)
+            }
+            IRExpr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => module::compile_method_call(self, receiver, method, args),
         }
     }
 
@@ -590,6 +624,9 @@ impl<'ctx> Compiler<'ctx> {
         // Save current variable scope
         let saved_variables = self.variables.clone();
         self.variables.clear();
+        // Parameters are treated as scalar (arrays don't cross function
+        // boundaries yet), so array tracking starts empty in a function body.
+        let saved_array_vars = std::mem::take(&mut self.maybe_array_vars);
 
         // Set up parameters as local variables
         for (i, param_name) in params.iter().enumerate() {
@@ -606,6 +643,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Restore variable scope
         self.variables = saved_variables;
+        self.maybe_array_vars = saved_array_vars;
 
         // Verify function
         if !function.verify(true) {
@@ -616,6 +654,34 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         Ok(())
+    }
+
+    /// Conservative compile-time test: could this expression evaluate to a
+    /// NumPy array at runtime?
+    ///
+    /// This is a "may" analysis — it must return `true` for every expression
+    /// that could possibly be an array (a false negative would miscompile array
+    /// code), while `false` simply means "definitely scalar, skip the array
+    /// machinery". The set of array producers is closed and small: NumPy
+    /// constructors, element-wise arithmetic with an array operand, and
+    /// variables already known to (maybe) hold an array.
+    ///
+    /// Arrays do not yet flow across user-defined function boundaries, so
+    /// user `Call` results and function parameters are treated as scalar.
+    pub(crate) fn expr_may_be_array(&self, expr: &IRExpr) -> bool {
+        match expr {
+            IRExpr::ModuleCall { module, func, .. } => {
+                module == "numpy" && matches!(func.as_str(), "array" | "zeros" | "ones" | "arange")
+            }
+            IRExpr::BinaryOp { op, left, right } => {
+                matches!(
+                    op,
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
+                ) && (self.expr_may_be_array(left) || self.expr_may_be_array(right))
+            }
+            IRExpr::Variable(name) => self.maybe_array_vars.contains(name),
+            _ => false,
+        }
     }
 
     pub(crate) fn create_entry_block_alloca(

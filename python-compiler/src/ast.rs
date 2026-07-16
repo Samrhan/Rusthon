@@ -73,6 +73,28 @@ pub enum IRExpr {
         list: Box<IRExpr>,
         index: Box<IRExpr>,
     },
+    /// Attribute access on a value, e.g. `arr.size` or `arr.ndim`.
+    ///
+    /// Attribute access on an *imported module* (e.g. `np.pi`) is resolved to a
+    /// module-level lookup during lowering and never produces this node.
+    Attribute { value: Box<IRExpr>, attr: String },
+    /// A call to a function exposed by an imported module, e.g. `np.array(...)`.
+    ///
+    /// `module` is the *canonical* module name (import aliases like `np` are
+    /// resolved to `numpy` during lowering), so codegen can dispatch on it
+    /// without knowing about the user's local aliases. This node is the generic
+    /// mechanism through which any imported module exposes built-in functions.
+    ModuleCall {
+        module: String,
+        func: String,
+        args: Vec<IRExpr>,
+    },
+    /// A method call on a value, e.g. `arr.sum()`.
+    MethodCall {
+        receiver: Box<IRExpr>,
+        method: String,
+        args: Vec<IRExpr>,
+    },
 }
 
 /// A simplified Intermediate Representation for statements.

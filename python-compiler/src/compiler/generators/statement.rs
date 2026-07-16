@@ -76,6 +76,11 @@ pub fn compile_assign<'ctx>(
     value: &IRExpr,
     current_fn: FunctionValue<'ctx>,
 ) -> Result<(), CodeGenError> {
+    // Track (conservatively) whether this variable may now hold an array, so
+    // later uses know whether to emit array-aware code. Computed on the IR
+    // before lowering to LLVM, using the arrayness of variables assigned so far.
+    let may_be_array = compiler.expr_may_be_array(value);
+
     let value = compiler.compile_expression(value)?;
     let ptr = compiler.variables.get(target).copied().unwrap_or_else(|| {
         let ptr = compiler.create_entry_block_alloca(target, current_fn);
@@ -83,6 +88,12 @@ pub fn compile_assign<'ctx>(
         ptr
     });
     compiler.builder.build_store(ptr, value).unwrap();
+
+    if may_be_array {
+        compiler.maybe_array_vars.insert(target.to_string());
+    } else {
+        compiler.maybe_array_vars.remove(target);
+    }
     Ok(())
 }
 
