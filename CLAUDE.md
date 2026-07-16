@@ -1,6 +1,6 @@
-# AI Agent Guide for Rusthon Compiler
+# Rusthon Developer Guide
 
-This document provides comprehensive guidance for AI agents working on the Rusthon Python-to-LLVM compiler project.
+This document is the developer/contributor guide for the Rusthon Python-to-LLVM compiler. It explains the architecture, where things live, and how to build, test, and extend the compiler.
 
 ## Table of Contents
 
@@ -20,10 +20,10 @@ This document provides comprehensive guidance for AI agents working on the Rusth
 
 **Rusthon** is a Python-to-LLVM compiler written in Rust that compiles a subset of Python to native code using LLVM 18. Key features:
 
-- **NaN-boxing optimization**: 50% memory reduction (16 bytes → 8 bytes per PyObject)
-- **LLVM 18 new pass manager**: O2 optimization pipeline with vectorization
-- **Mutual recursion support**: Two-pass compilation
-- **Type system**: Runtime type checking with tagged unions
+- **NaN-boxing**: single 64-bit `PyObject` (8 bytes instead of a 16-byte tagged struct)
+- **LLVM 18 new pass manager**: `default<O2>` optimization pipeline with vectorization
+- **Mutual recursion support**: two-pass compilation
+- **Type system**: runtime type checking with tagged values
 - **Integer range**: ±140 trillion (48-bit signed integers)
 
 **Location**: `/home/user/Rusthon/python-compiler/`
@@ -43,7 +43,7 @@ Python Source → Parser → AST → Lowering → IR → CodeGen → LLVM IR →
 - Produces `rustpython_parser::ast` (Python AST)
 
 #### 2. **Lowering** (`lowering.rs`)
-- Converts Python AST → Custom IR
+- Converts Python AST → custom IR
 - Handles:
   - Expression statements
   - Augmented assignments (desugar to binary ops)
@@ -51,17 +51,23 @@ Python Source → Parser → AST → Lowering → IR → CodeGen → LLVM IR →
   - Function definitions
 - **Key types**: `IRExpr`, `IRStmt`
 
-#### 3. **CodeGen** (`codegen.rs`)
+#### 3. **CodeGen** (`codegen.rs` + `compiler/`)
 - Converts IR → LLVM IR
-- **NaN-boxing**: All values are `i64` (PyObject)
+- **NaN-boxing**: all values are `i64` (PyObject)
 - **Two-pass compilation**:
-  - Pass 1: Declare all function signatures
-  - Pass 2: Compile function bodies (enables mutual recursion)
-- **String cleanup**: Only tracks strings allocated in main entry block
+  - Pass 1: declare all function signatures
+  - Pass 2: compile function bodies (enables mutual recursion)
+- **String cleanup**: only tracks strings allocated in the main entry block
+- Codegen is split across modules:
+  - `codegen.rs` — the `Compiler` driver and two-pass orchestration
+  - `compiler/values.rs` — the NaN-boxing value system (`ValueManager`)
+  - `compiler/runtime.rs` — external C functions and format strings
+  - `compiler/generators/expression.rs` — expression compilation
+  - `compiler/generators/statement.rs` — statement compilation
 
 #### 4. **Optimization** (LLVM 18 new pass manager)
 - Pipeline: `default<O2>`
-- Features: Loop vectorization, SLP vectorization, function merging
+- Features: loop vectorization, SLP vectorization, function merging
 - Method: `Module::run_passes()`
 
 ### Memory Model
@@ -82,18 +88,20 @@ Tagged: [1][11111111111][1][ tag (3 bits) ][ payload (48 bits) ]
 ```
 
 **Type Tags**:
-- `TAG_INT = 0`: Signed 48-bit integer
-- `TAG_BOOL = 1`: Boolean (1-bit payload)
-- `TAG_STRING = 2`: String pointer (48-bit)
-- `TAG_LIST = 3`: List pointer (48-bit)
-- Floats: No tag (stored as canonical float64)
+- `TAG_INT = 0`: signed 48-bit integer
+- `TAG_BOOL = 1`: boolean (1-bit payload)
+- `TAG_STRING = 2`: string pointer (48-bit)
+- `TAG_LIST = 3`: list pointer (48-bit)
+- Floats: no tag (stored as canonical float64)
 
-**Constants** (`codegen.rs:13-21`):
+**Constants** (`compiler/values.rs`):
 ```rust
 const QNAN: u64 = 0x7FF8_0000_0000_0000;
 const TAG_MASK: u64 = 0x0007_0000_0000_0000;
 const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
 ```
+
+> `src/tagged_pointer.rs` holds a standalone, unit-tested reference implementation of the same NaN-boxing scheme. The constants used by codegen live in `compiler/values.rs`.
 
 ### List Memory Layout
 
@@ -110,17 +118,16 @@ Value:   3         10          20          30
 
 **Implementation Details**:
 - **Allocation**: `malloc((n + 1) * sizeof(i64))` where n = number of elements
-- **Length storage**: Offset 0 contains the list length as i64
-- **Element storage**: Elements start at offset 1
+- **Length storage**: offset 0 contains the list length as i64
+- **Element storage**: elements start at offset 1
 - **Indexing**: `list[i]` accesses offset `i + 1` to skip the length header
-- **len() operation**: Reads i64 at offset 0 (O(1) time)
+- **len() operation**: reads i64 at offset 0 (O(1) time)
 - **Memory overhead**: +8 bytes per list (1 i64 header)
 
 **Code locations**:
-- List allocation: `codegen.rs:1644-1713` (`IRExpr::List`)
-- Length extraction: `codegen.rs:225-268` (`extract_list_ptr_and_len`)
-- List indexing: `codegen.rs:1730-1776` (`IRExpr::Index`)
-- len() for lists: `codegen.rs:1458-1557` (`IRExpr::Len`)
+- List allocation & indexing (`IRExpr::List`, `IRExpr::Index`): `compiler/generators/expression.rs`
+- `len()` for lists (`IRExpr::Len`): `compiler/generators/expression.rs`
+- Length extraction (`extract_list_ptr_and_len`): `compiler/values.rs`
 
 ---
 
@@ -131,47 +138,57 @@ Value:   3         10          20          30
 | File | Purpose | Key Functions/Types |
 |------|---------|---------------------|
 | `lib.rs` | Library entry point | Exports all public modules |
-| `main.rs` | CLI entry point | Argument parsing, file I/O |
+| `main.rs` | CLI entry point | Argument parsing, file I/O, invokes `clang` |
 | `parser.rs` | Python parsing | `parse_program()` |
 | `ast.rs` | IR definitions | `IRExpr`, `IRStmt`, `BinOp`, `CmpOp`, `UnaryOp` |
 | `lowering.rs` | AST → IR | `lower_program()`, `lower_statement()`, `lower_expression()` |
-| `codegen.rs` | IR → LLVM IR (1800+ lines) | `Compiler`, `compile_program()`, `compile_expression()` |
-| `tagged_pointer.rs` | NaN-boxing utilities | `box_int()`, `unbox_int()`, type discrimination |
-| `error.rs` | Error types | `CodeGenError`, `LoweringError` |
-| `compiler.rs` | Orchestration | High-level compilation interface |
+| `codegen.rs` | Compilation driver | `Compiler`, `compile_program()`, two-pass orchestration |
+| `compiler/mod.rs` | Codegen submodule root | Re-exports generators/runtime/values |
+| `compiler/values.rs` | NaN-boxing value system | `ValueManager`, type tags & constants |
+| `compiler/runtime.rs` | Runtime intrinsics | `Runtime`, `FormatStrings` (printf/scanf/malloc/…) |
+| `compiler/generators/expression.rs` | Expression codegen | `compile_binary_op`, `compile_comparison`, list/index/len/call helpers |
+| `compiler/generators/statement.rs` | Statement codegen | Statement compilation helpers |
+| `tagged_pointer.rs` | NaN-boxing reference impl | `box_int()`, `unbox_int()`, type discrimination + unit tests |
+| `error.rs` | Error types & reporting | `CodeGenError`, `LoweringError`, ariadne diagnostics |
 
 ### Test Files (`python-compiler/tests/`)
 
 | File | Tests | Count |
 |------|-------|-------|
-| `augmented_assignment.rs` | `+=`, `-=`, `*=`, etc. | 15 |
 | `arithmetic.rs` | Basic math ops | 3 |
+| `augmented_assignment.rs` | `+=`, `-=`, `*=`, etc. | 15 |
 | `bitwise.rs` | `&`, `|`, `^`, `<<`, `>>` | 12 |
 | `complex_control_flow.rs` | Recursion, algorithms | 18 |
 | `control_flow.rs` | If/while/for | 15 |
+| `default_arguments.rs` | Function default arguments | 3 |
 | `edge_cases.rs` | Mutual recursion, overflow | 20 |
 | `errors.rs` | Error handling | 5 |
-| `floats.rs` | Float operations | 3 |
+| `floats.rs` | Float operations | 9 |
 | `functions.rs` | Function calls, defaults | 6 |
+| `input.rs` | `input()` from stdin | 3 |
 | `integration.rs` | End-to-end scenarios | 4 |
-| `lists.rs` | List operations | 9 |
+| `lists.rs` | List operations | 6 |
+| `minimal_test.rs` | Smoke test | 1 |
+| `precedence.rs` | Operator precedence | 18 |
 | `strings.rs` | String operations | 28 |
-| `variables.rs` | Variable assignment | 3 |
 | `unary.rs` | Unary operators | 15 |
-| `precedence.rs` | Operator precedence | 15 |
+| `variables.rs` | Variable assignment | 3 |
 
-**Total**: ~174 tests
+**Total**: 184 tests
 
 ### Documentation (`docs/`)
 
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
-| `README.md` | Main project documentation (French) |
-| `IMPLEMENTATION_SUMMARY.md` | Detailed feature documentation (755 lines) |
-| `TAGGED_POINTER_INTEGRATION.md` | NaN-boxing integration details |
-| `docs/architecture/` | Architecture docs (optimizations, compilation, memory, types) |
-| `docs/limitations.md` | Current limitations and workarounds (423 lines) |
+| `docs/README.md` | Documentation home |
+| `docs/getting-started/` | Installation and quick start |
+| `docs/architecture/` | Compilation pipeline, memory model, optimizations, type system |
+| `docs/language-features/` | Feature reference |
+| `docs/limitations.md` | Current limitations and workarounds |
+| `docs/roadmap.md` | Planned features |
 | `docs/testing/` | Testing guides |
+| `docs/BUILD.md` | Build instructions |
+| `docs/contributing.md` | Contribution guidelines |
 
 ---
 
@@ -190,7 +207,7 @@ apt-get install -y llvm-18 llvm-18-dev llvm-18-runtime \
 
 ```toml
 [dependencies]
-inkwell = { version = "0.7.0", features = ["llvm18-1"] }
+inkwell = { version = "0.7.0", features = ["llvm18-1"], default-features = false }
 rustpython-parser = "0.4"
 thiserror = "1.0"
 ariadne = "0.4"      # Error messages
@@ -275,16 +292,16 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ### 5. Git Workflow
 
-**Branch naming**: `claude/fix-description-{sessionId}`
+Use short, descriptive branch names, e.g. `feature/list-slicing` or `fix/string-dominance`.
 
 ```bash
 # Create branch
-git checkout -b claude/fix-issue-name-sessionId
+git checkout -b feature/my-change
 
 # Stage changes
 git add -A
 
-# Commit with detailed message
+# Commit with a detailed message
 git commit -m "feat: Add feature X
 
 Detailed description...
@@ -295,14 +312,14 @@ Changes:
 
 Test results: X/Y passing"
 
-# Push with retry logic
-git push -u origin branch-name
+# Push
+git push -u origin feature/my-change
 ```
 
 **Commit message format**:
 - Prefix: `feat:`, `fix:`, `refactor:`, `style:`, `docs:`, `test:`
-- First line: Concise summary (50-72 chars)
-- Body: Detailed changes, files modified, test results
+- First line: concise summary (50-72 chars)
+- Body: detailed changes, files modified, test results
 
 ---
 
@@ -525,9 +542,9 @@ fn test_undefined_variable_error() {
 ### Adding a New Binary Operator
 
 **Files to modify**:
-1. `src/ast.rs`: Add variant to `BinOp` enum
-2. `src/lowering.rs`: Add case in `lower_binop()`
-3. `src/codegen.rs`: Add case in `compile_expression()` for `BinaryOp`
+1. `src/ast.rs`: add variant to `BinOp` enum
+2. `src/lowering.rs`: add case in `lower_binop()`
+3. `src/compiler/generators/expression.rs`: add case in `compile_binary_op()`
 4. Create test file: `tests/new_operator.rs`
 
 **Example**:
@@ -541,7 +558,7 @@ pub enum BinOp {
 // 2. lowering.rs
 ast::Operator::FloorDiv => Ok(BinOp::FloorDiv),
 
-// 3. codegen.rs
+// 3. compiler/generators/expression.rs
 BinOp::FloorDiv => {
     // Convert to float, divide, floor, convert back to int
 }
@@ -557,9 +574,9 @@ fn test_floor_div() {
 ### Adding a New Statement Type
 
 **Files to modify**:
-1. `src/ast.rs`: Add variant to `IRStmt` enum
-2. `src/lowering.rs`: Add case in `lower_statement()`
-3. `src/codegen.rs`: Add case in `compile_statement()`
+1. `src/ast.rs`: add variant to `IRStmt` enum
+2. `src/lowering.rs`: add case in `lower_statement()`
+3. `src/compiler/generators/statement.rs`: add case in statement compilation
 
 **Example (expression statements)**:
 ```rust
@@ -575,7 +592,7 @@ ast::Stmt::Expr(ast::StmtExpr { value, .. }) => {
     Ok(IRStmt::ExprStmt(expr))
 }
 
-// 3. codegen.rs
+// 3. compiler/generators/statement.rs
 IRStmt::ExprStmt(expr) => {
     self.compile_expression(expr)?;  // Evaluate and discard
 }
@@ -586,8 +603,8 @@ IRStmt::ExprStmt(expr) => {
 When LLVM APIs change:
 
 1. **Check inkwell version**: `Cargo.toml` → `inkwell` features
-2. **Review inkwell tests**: `/root/.cargo/registry/src/.../inkwell-X.Y.Z/tests/`
-3. **Update imports**: New types, changed namespaces
+2. **Review inkwell tests**: `~/.cargo/registry/src/.../inkwell-X.Y.Z/tests/`
+3. **Update imports**: new types, changed namespaces
 4. **Replace deprecated methods**:
    - Old: `PassManager::create()` + individual passes
    - New: `Module::run_passes("default<O2>", ...)`
@@ -596,7 +613,7 @@ When LLVM APIs change:
 
 ### Fixing Dominance Issues
 
-**Problem**: Value doesn't dominate its uses (allocated in conditional block).
+**Problem**: value doesn't dominate its uses (allocated in a conditional block).
 
 **Solution patterns**:
 
@@ -610,17 +627,16 @@ if let Some(main_entry) = self.main_entry_block {
 ```
 
 2. **Use phi nodes** to merge values from branches
-3. **Allocate in entry block**, set conditionally
+3. **Allocate in the entry block**, set conditionally
 
 ### Updating Integer Range Limits
 
 **Files to update**:
-1. `docs/limitations.md`: Document new range
-2. `docs/architecture/optimizations.md`: Update type encoding table
-3. `IMPLEMENTATION_SUMMARY.md`: Update NaN-boxing section
-4. `TAGGED_POINTER_INTEGRATION.md`: Update limitations
+1. `docs/limitations.md`: document new range
+2. `docs/architecture/optimizations.md`: update type encoding table
+3. `docs/architecture/type-system.md`: update NaN-boxing section
 
-**Constants** (`codegen.rs:15`):
+**Constants** (`compiler/values.rs`):
 ```rust
 const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;  // 48-bit = ±140 trillion
 ```
@@ -650,9 +666,9 @@ UndefinedVariable("function 'foo'")
 ```
 
 **Solutions**:
-1. Check if function is declared before use
+1. Check if the function is declared before use
 2. For mutual recursion: ensure two-pass compilation is working
-3. Verify function is in `self.functions` HashMap
+3. Verify the function is in `self.functions`
 
 ### Issue: Snapshot Tests Failing
 
@@ -664,7 +680,7 @@ snapshot assertion for 'test_name' failed
 **Solutions**:
 1. Review changes: `cargo insta review`
 2. If correct: `cargo insta test --accept`
-3. If incorrect: Fix code, don't accept bad snapshots
+3. If incorrect: fix the code, don't accept bad snapshots
 
 ### Issue: LLVM Headers Not Found
 
@@ -705,17 +721,17 @@ Change ASCII diagrams from ` ``` ` to ` ```text`
 ### Issue: CI Failing
 
 **Common causes**:
-1. Formatting: Run `cargo fmt --all`
-2. Clippy warnings: Run `cargo clippy --fix`
-3. Test failures: Run `cargo test` and fix issues
-4. Snapshot mismatches: Accept correct snapshots
+1. Formatting: run `cargo fmt --all`
+2. Clippy warnings: run `cargo clippy --fix`
+3. Test failures: run `cargo test` and fix issues
+4. Snapshot mismatches: accept correct snapshots
 
 **Debug steps**:
 ```bash
 # Check what CI runs
 cat .github/workflows/rust-ci.yml
 
-# Run same checks locally
+# Run the same checks locally
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --verbose
@@ -727,43 +743,43 @@ cargo test --verbose
 
 ### Memory Optimization
 
-- **NaN-boxing**: Reduces PyObject from 16→8 bytes (50% savings)
-- **Stack allocation**: Prefer stack over heap where possible
-- **Arena allocation**: Batch allocate strings (partially implemented)
+- **NaN-boxing**: reduces PyObject from 16→8 bytes (50% savings)
+- **Stack allocation**: prefer stack over heap where possible
+- **Arena allocation**: batch-free strings at program exit
 
 ### Compilation Performance
 
-- **Two-pass functions**: Slight overhead but enables mutual recursion
-- **LLVM O2**: Balances compile time vs runtime performance
+- **Two-pass functions**: slight overhead but enables mutual recursion
+- **LLVM O2**: balances compile time vs runtime performance
 - **Optimization passes**: ~20-30% longer compile time, significant runtime gains
 
 ### Runtime Performance
 
-- **Type checking**: Single bit test for float vs non-float (~40% faster than struct)
-- **Value extraction**: Bitwise operations (no pointer chasing)
-- **Vectorization**: Enabled via LLVM SLP and loop vectorization
+- **Type checking**: single bit test for float vs non-float
+- **Value extraction**: bitwise operations (no pointer chasing)
+- **Vectorization**: enabled via LLVM SLP and loop vectorization
 
 ---
 
 ## Best Practices
 
 ### DO:
-✅ Run tests before committing
-✅ Format code with `cargo fmt`
-✅ Accept snapshots only if output is correct
-✅ Document complex algorithms
-✅ Use descriptive commit messages
-✅ Test edge cases (overflow, recursion depth, type mixing)
-✅ Update documentation when adding features
+- ✅ Run tests before committing
+- ✅ Format code with `cargo fmt`
+- ✅ Accept snapshots only if output is correct
+- ✅ Document complex algorithms
+- ✅ Use descriptive commit messages
+- ✅ Test edge cases (overflow, recursion depth, type mixing)
+- ✅ Update documentation when adding features
 
 ### DON'T:
-❌ Commit without running tests
-❌ Accept snapshot changes without reviewing
-❌ Add dead code (clippy will warn)
-❌ Use `unsafe` without thorough justification
-❌ Skip formatting checks
-❌ Push to main branch directly
-❌ Optimize prematurely (measure first)
+- ❌ Commit without running tests
+- ❌ Accept snapshot changes without reviewing
+- ❌ Add dead code (clippy will warn)
+- ❌ Use `unsafe` without thorough justification
+- ❌ Skip formatting checks
+- ❌ Push directly to `main`
+- ❌ Optimize prematurely (measure first)
 
 ---
 
@@ -775,33 +791,40 @@ cargo test --verbose
 /home/user/Rusthon/
 ├── python-compiler/
 │   ├── src/
-│   │   ├── codegen.rs          (1800+ lines, IR → LLVM)
-│   │   ├── lowering.rs         (AST → IR)
-│   │   ├── ast.rs              (IR types)
+│   │   ├── codegen.rs                       # Compiler driver, two-pass orchestration
+│   │   ├── compiler/
+│   │   │   ├── values.rs                    # NaN-boxing value system
+│   │   │   ├── runtime.rs                   # Runtime intrinsics & format strings
+│   │   │   └── generators/
+│   │   │       ├── expression.rs            # Expression codegen
+│   │   │       └── statement.rs             # Statement codegen
+│   │   ├── lowering.rs                      # AST → IR
+│   │   ├── ast.rs                           # IR types
+│   │   ├── tagged_pointer.rs                # NaN-boxing reference impl + tests
 │   │   └── ...
-│   ├── tests/
-│   │   └── *.rs                (174 tests)
+│   ├── tests/                               # 184 tests
 │   └── Cargo.toml
 ├── docs/
 │   ├── architecture/
 │   └── limitations.md
-├── IMPLEMENTATION_SUMMARY.md   (755 lines)
-└── AGENT.md                    (this file)
+├── README.md
+└── CLAUDE.md                                # this file
 ```
 
 ### Key Constants
 
 ```rust
-// codegen.rs
+// compiler/values.rs
 const QNAN: u64 = 0x7FF8_0000_0000_0000;
 const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;  // 48-bit
 const TAG_INT: u64 = 0;
 const TAG_BOOL: u64 = 1;
 const TAG_STRING: u64 = 2;
+const TAG_LIST: u64 = 3;
 
 // Integer range
-const MAX_INT: i64 = 140_737_488_355_328;   // 2^47
-const MIN_INT: i64 = -140_737_488_355_328;  // -2^47
+// MAX_INT =  140_737_488_355_328   (2^47)
+// MIN_INT = -140_737_488_355_328  (-2^47)
 ```
 
 ### Common Commands
@@ -824,7 +847,7 @@ cargo clippy
 # Git
 git add -A
 git commit -m "feat: description"
-git push -u origin claude/branch-name-sessionId
+git push -u origin <branch-name>
 ```
 
 ---
@@ -835,10 +858,3 @@ git push -u origin claude/branch-name-sessionId
 - **Inkwell Docs**: https://docs.rs/inkwell/0.7.1/
 - **RustPython Parser**: https://docs.rs/rustpython-parser/
 - **Insta (Snapshots)**: https://insta.rs/
-
----
-
-**Last Updated**: 2025-11-28
-**Version**: 1.1
-**Branch**: `claude/implement-list-allocation-011WAnqDHpZqBFVuMe8Rfe9e`
-**Recent Changes**: Added list allocation with length header implementation
