@@ -1,484 +1,380 @@
-# Compilateur Python vers LLVM en Rust : guide complet pour un POC
+# Rusthon
 
-Un compilateur Python en Rust avec LLVM est réalisable en **3 semaines** avec l'approche incrémentale. **Inkwell** (wrapper LLVM) combiné à **rustpython-parser** constitue le stack technologique optimal pour ce POC. Les projets similaires comme Numba et Codon démontrent qu'un sous-ensemble Python compilé peut atteindre des performances **10-100x supérieures** à CPython, à condition de restreindre le typage dynamique.
+> A Python-to-LLVM compiler written in Rust that compiles a subset of Python straight to native machine code.
+
+[![Rust CI](https://github.com/Samrhan/Rusthon/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/Samrhan/Rusthon/actions/workflows/rust-ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#license)
+[![LLVM 18](https://img.shields.io/badge/LLVM-18-orange.svg)](https://llvm.org/)
+
+Rusthon parses Python with [`rustpython-parser`](https://github.com/RustPython/RustPython), lowers it to a small custom IR, and emits [LLVM 18](https://llvm.org/) IR through [Inkwell](https://github.com/TheDan64/inkwell). The result is linked by `clang` into a standalone native executable — no interpreter, no runtime GC, no CPython.
 
 ---
 
-## Bindings LLVM : Inkwell domine pour un POC
+## Table of Contents
 
-Pour un compilateur Python en Rust, **Inkwell est la recommandation claire**. Ce wrapper safe autour de llvm-sys offre une API idiomatique Rust avec typage fort au niveau des types LLVM, interceptant les erreurs à la compilation plutôt qu'au runtime.
+- [Highlights](#highlights)
+- [Quick Example](#quick-example)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Supported Python Subset](#supported-python-subset)
+- [How It Works](#how-it-works)
+- [Memory Model: NaN-Boxing](#memory-model-nan-boxing)
+- [Project Structure](#project-structure)
+- [Testing](#testing)
+- [Documentation](#documentation)
+- [Limitations](#limitations)
+- [Contributing](#contributing)
+- [License](#license)
 
-### Inkwell : avantages et mise en place
+---
 
-Inkwell (858K+ téléchargements, version 0.7.0) supporte LLVM 8-21 via feature flags. Son architecture repose sur trois concepts : `Context` (gère les ressources LLVM), `Module` (unité de compilation), et `Builder` (construit les instructions IR).
+## Highlights
 
-```toml
-# Cargo.toml
-[dependencies]
-inkwell = { version = "0.7.0", features = ["llvm18-0"] }
+- **Native compilation** — Python source → LLVM IR → native executable via `clang`.
+- **NaN-boxed values** — every value is a single 64-bit `PyObject`, halving memory versus a tagged struct (16 → 8 bytes).
+- **LLVM 18 optimization** — codegen runs the new pass manager's `default<O2>` pipeline (loop/SLP vectorization, function merging).
+- **Two-pass function compilation** — signatures are declared before bodies, so mutual recursion works out of the box.
+- **Dynamic typing with automatic promotion** — integers and floats mix freely; types are discriminated at runtime.
+- **Rich operator support** — arithmetic, bitwise, comparison, unary, and augmented assignment.
+- **Control flow** — `if`/`else`, `while`, range-based `for`, plus `break` and `continue`.
+- **Heap-allocated lists** with an O(1) `len()` length header.
+- **Friendly diagnostics** — parse, lowering, and codegen errors are rendered with [ariadne](https://github.com/zesterer/ariadne), pointing at the offending line and column.
+- **~174 snapshot tests** covering every language feature via [insta](https://insta.rs/).
+
+## Quick Example
+
+```python
+# fibonacci.py
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+
+for i in range(10):
+    print(fibonacci(i))
 ```
+
+Compile and run it:
+
+```bash
+cd python-compiler
+cargo run -- fibonacci.py   # produces fibonacci.ll and a native ./fibonacci
+./fibonacci
+```
+
+```
+0
+1
+1
+2
+3
+5
+8
+13
+21
+34
+```
+
+## Installation
+
+### Prerequisites
+
+- **Rust** 1.70 or later ([rustup.rs](https://rustup.rs))
+- **LLVM 18** with development headers
+- **Clang** (used to link the generated LLVM IR into an executable)
+
+### Install LLVM 18
+
+**Ubuntu / Debian**
+
+```bash
+sudo apt-get update
+sudo apt-get install -y llvm-18 llvm-18-dev llvm-18-runtime \
+  libllvm18 libpolly-18-dev clang-18 libclang-18-dev libzstd-dev cmake
+export LLVM_SYS_181_PREFIX=/usr/lib/llvm-18
+```
+
+**macOS (Homebrew)**
+
+```bash
+brew install llvm@18
+export LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)
+```
+
+**Arch Linux**
+
+```bash
+sudo pacman -S llvm18 clang
+export LLVM_SYS_181_PREFIX=/usr/lib/llvm18
+```
+
+> `LLVM_SYS_181_PREFIX` must point at your LLVM 18 install so the `inkwell`/`llvm-sys` build can find the libraries. Add it to your shell profile to make it permanent.
+
+### Build
+
+```bash
+cd python-compiler
+cargo build --release
+```
+
+### Dev Container (optional)
+
+A ready-to-use [Dev Container](https://containers.dev/) is provided with LLVM 18 preinstalled. Open the repo in VS Code with the *Dev Containers* extension and choose **Reopen in Container** — see [`.devcontainer/README.md`](.devcontainer/README.md).
+
+## Usage
+
+### As a command-line compiler
+
+The CLI takes a single `.py` file, writes the generated LLVM IR next to it, and links a native executable:
+
+```bash
+cd python-compiler
+cargo run -- path/to/program.py
+```
+
+For `program.py` this produces:
+
+- `program.ll` — the generated LLVM IR (inspect it to see what the compiler emits)
+- `program` — a native, standalone executable
+
+Then just run it:
+
+```bash
+./program
+```
+
+Ready-made samples live in [`python-compiler/examples/`](python-compiler/examples/):
+
+```bash
+cargo run -- examples/control_flow.py && ./control_flow
+cargo run -- examples/strings.py && ./strings
+```
+
+### As a library
+
+The compilation pipeline is also exposed as a library:
 
 ```rust
 use inkwell::context::Context;
-use inkwell::OptimizationLevel;
+use python_compiler::{parser, lowering, codegen};
 
-type SumFunc = unsafe extern "C" fn(u64, u64) -> u64;
-
-fn main() {
-    let context = Context::create();
-    let module = context.create_module("calculateur");
-    let builder = context.create_builder();
-    
-    // Définir la fonction: i64 add(i64 a, i64 b)
-    let i64_type = context.i64_type();
-    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-    let function = module.add_function("add", fn_type, None);
-    
-    // Créer le bloc d'entrée
-    let entry = context.append_basic_block(function, "entry");
-    builder.position_at_end(entry);
-    
-    // Récupérer les paramètres et construire l'addition
-    let x = function.get_nth_param(0).unwrap().into_int_value();
-    let y = function.get_nth_param(1).unwrap().into_int_value();
-    let sum = builder.build_int_add(x, y, "sum").unwrap();
-    builder.build_return(Some(&sum)).unwrap();
-    
-    // Compilation JIT et exécution
-    let engine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
-    unsafe {
-        let add_fn: inkwell::execution_engine::JitFunction<SumFunc> = 
-            engine.get_function("add").unwrap();
-        println!("5 + 3 = {}", add_fn.call(5, 3)); // Output: 8
-    }
-}
-```
-
-### Cranelift : alternative pure Rust
-
-Cranelift (du Bytecode Alliance) compile **10x plus vite** que LLVM mais produit du code ~14% moins performant. Écrit entièrement en Rust (~200K lignes vs 20M+ pour LLVM), il simplifie radicalement la configuration : pas d'installation LLVM requise.
-
-| Critère | Inkwell/LLVM | Cranelift |
-|---------|--------------|-----------|
-| Vitesse de compilation | Plus lent | **10x plus rapide** |
-| Qualité du code | **Optimal** | -14% |
-| Setup | Requiert LLVM | Pure Rust |
-| Cas d'usage | Production AOT | JIT, debug |
-
-**Verdict** : Inkwell pour le POC. Les tutoriels Kaleidoscope et le livre "Create Your Own Language with Rust" (createlang.rs) utilisent Inkwell, facilitant l'apprentissage.
-
----
-
-## Parser Python : rustpython-parser recommandé
-
-Pour parser le sous-ensemble Python ciblé, **rustpython-parser** (50K+ téléchargements/mois, utilisé par Ruff) offre la meilleure balance maturité/API.
-
-### Intégration de rustpython-parser
-
-```toml
-[dependencies]
-rustpython-parser = "0.4"
-```
-
-```rust
-use rustpython_parser::{Parse, ast};
-
-fn main() {
-    let source = r#"
+let source = r#"
 def add(a, b):
     return a + b
 
-x = add(1, 2)
-print(x)
+print(add(5, 3))
 "#;
 
-    // Parser le code en AST
-    let statements = ast::Suite::parse(source, "<input>").unwrap();
-    
-    for stmt in &statements {
-        println!("{:#?}", stmt);
-    }
-}
+let ast = parser::parse_program(source).unwrap();      // Python source -> Python AST
+let ir = lowering::lower_program(&ast).unwrap();       // Python AST   -> custom IR
+let context = Context::create();
+let compiler = codegen::Compiler::new(&context);
+let llvm_ir = compiler.compile_program(&ir).unwrap();  // IR           -> LLVM IR
+
+println!("{llvm_ir}");
 ```
 
-### Conversion AST vers IR personnalisée
+## Supported Python Subset
 
-Le pattern clé consiste à définir une IR intermédiaire simplifiée, puis à "lower" l'AST Python vers cette IR :
+### Literals & values
 
-```rust
-// Définition de l'IR simplifiée pour le sous-ensemble
-#[derive(Debug, Clone)]
-enum IRExpr {
-    Constant(i64),
-    Float(f64),
-    Variable(String),
-    BinaryOp { op: BinOp, left: Box<IRExpr>, right: Box<IRExpr> },
-    Call { func: String, args: Vec<IRExpr> },
-}
+| Kind | Examples |
+|------|----------|
+| Integers | `42`, `-7`, `1_000` (48-bit signed, ±140 trillion) |
+| Floats | `3.14`, `2.5` |
+| Booleans | `True`, `False` |
+| Strings | `"hello"`, with escape sequences |
+| Lists | `[1, 2, 3]`, indexed with `xs[i]` |
 
-#[derive(Debug, Clone)]
-enum IRStmt {
-    Assign { target: String, value: IRExpr },
-    Print(IRExpr),
-    FunctionDef { name: String, params: Vec<String>, body: Vec<IRStmt> },
-    Return(IRExpr),
-}
+### Operators
 
-// Lowering de l'AST Python vers l'IR
-use rustpython_parser::ast::{self, Stmt, Expr, Operator};
+- **Arithmetic:** `+` `-` `*` `/` `%`
+- **Bitwise:** `&` `|` `^` `<<` `>>`
+- **Comparison:** `==` `!=` `<` `>` `<=` `>=`
+- **Unary:** `-x` `+x` `~x` `not x`
+- **Augmented assignment:** `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=` (desugared to the matching binary op)
 
-fn lower_expr(expr: &Expr) -> Result<IRExpr, String> {
-    match expr {
-        Expr::Constant(c) => match &c.value {
-            ast::Constant::Int(n) => Ok(IRExpr::Constant(n.as_i64().unwrap())),
-            ast::Constant::Float(f) => Ok(IRExpr::Float(*f)),
-            _ => Err("Type de constante non supporté".into()),
-        },
-        Expr::Name(name) => Ok(IRExpr::Variable(name.id.to_string())),
-        Expr::BinOp(binop) => {
-            let op = match binop.op {
-                Operator::Add => BinOp::Add,
-                Operator::Sub => BinOp::Sub,
-                Operator::Mult => BinOp::Mul,
-                Operator::Div => BinOp::Div,
-                _ => return Err("Opérateur non supporté".into()),
-            };
-            Ok(IRExpr::BinaryOp {
-                op,
-                left: Box::new(lower_expr(&binop.left)?),
-                right: Box::new(lower_expr(&binop.right)?),
-            })
-        }
-        _ => Err(format!("Expression non supportée: {:?}", expr)),
-    }
-}
+### Statements
+
+```python
+x = 10                      # assignment
+y = x + 5
+
+if x > y:                   # if / else
+    print("bigger")
+else:
+    print("smaller")
+
+while x > 0:                # while loop
+    x -= 1
+
+for i in range(2, 8):       # range-based for  (range(end) or range(start, end))
+    if i == 5:
+        continue            # continue
+    if i == 7:
+        break               # break
+    print(i)
+
+def scale(value, factor=2): # functions with default arguments
+    return value * factor
+
+print(scale(21))            # print (accepts multiple arguments)
+print(len([1, 2, 3]))       # built-in len()
+name = input()              # read a value from stdin
 ```
 
-### Faut-il écrire son propre parser ?
+Supported built-ins: `print(...)`, `input()`, `len(...)`, and `range(...)` (inside `for`). Functions support recursion, mutual recursion, multiple parameters, and default arguments.
 
-Pour un vrai sous-ensemble avec syntaxe modifiée, **pest** (PEG parser generator) est excellent. Pour un sous-ensemble Python standard, rustpython-parser économise des semaines de travail tout en garantissant la compatibilité syntaxique.
+## How It Works
 
----
-
-## Projets similaires : leçons architecturales
-
-L'analyse de Numba, Codon, Nuitka et Mojo révèle des patterns essentiels pour gérer le typage dynamique de Python dans un contexte compilé.
-
-### Numba : le modèle JIT par inférence de types
-
-Numba compile un sous-ensemble numérique de Python via LLVM avec des speedups de **100x+**. Son approche : inférer les types au premier appel, puis spécialiser le code généré.
+Rusthon follows a classic multi-pass pipeline:
 
 ```
-Pipeline Numba:
-Python Bytecode → Numba IR (SSA) → Inférence de types → LLVM IR → Code natif
+Python Source
+     │  parser.rs            (rustpython-parser)
+     ▼
+Python AST
+     │  lowering.rs          (AST → custom IR)
+     ▼
+Custom IR  (ast.rs: IRExpr / IRStmt)
+     │  codegen.rs           (Inkwell / LLVM 18)
+     ▼
+LLVM IR
+     │  LLVM new pass manager: default<O2>
+     ▼
+Optimized LLVM IR
+     │  clang -lm
+     ▼
+Native executable
 ```
 
-**Leçon clé** : Le mode "nopython" (compilation complète sans fallback Python) donne les meilleures performances. Définir explicitement ce qui est supporté et rejeter le reste.
+1. **Parse** — `rustpython-parser` turns source into a Python AST.
+2. **Lower** — the AST is desugared into a small, explicit IR (`IRExpr`, `IRStmt`). Augmented assignments become plain binary ops; `for i in range(...)` becomes a bounded loop.
+3. **Codegen** — a two-pass walk over the IR emits LLVM IR through Inkwell. Pass 1 declares every function signature; pass 2 fills in the bodies, which is what makes mutual recursion possible.
+4. **Optimize** — the module is run through LLVM's `default<O2>` pipeline via `Module::run_passes`.
+5. **Link** — the CLI shells out to `clang` to produce a native executable.
 
-### Codon : compilateur AOT haute performance
+## Memory Model: NaN-Boxing
 
-Codon (MIT) produit des performances comparables au C/C++ pour un sous-ensemble Python via LLVM. Son IR intermédiaire est plus haut niveau que LLVM IR, permettant des optimisations spécifiques (reconnaissance de patterns comme `for x in range(n)`).
+Every runtime value is a single `i64` (`PyObject`). Floats are stored as canonical IEEE-754 doubles; every other type is encoded inside the payload of a quiet NaN, using a 3-bit tag and a 48-bit payload.
 
-**Leçon clé** : Une IR intermédiaire entre l'AST et LLVM IR facilite les optimisations domain-specific.
+```text
+Floats: [ sign ][  exponent  ][            mantissa            ]
+        [1 bit ][   11 bits   ][            52 bits             ]
 
-### Nuitka vs Mojo : deux philosophies
-
-| Aspect | Nuitka | Mojo |
-|--------|--------|------|
-| Compatibilité | 100% Python | Superset avec nouvelles features |
-| Speedup | 1-4x | 10-35000x |
-| Approche | Transpilation → C → CPython embedded | Static typing + MLIR/LLVM |
-| Trade-off | Compatibilité max | Performance max |
-
-**Leçon pour le POC** : Cibler un sous-ensemble restreint comme Numba/Codon plutôt que la compatibilité totale de Nuitka.
-
----
-
-## Architecture recommandée pour le compilateur
-
-Le pipeline classique s'adapte bien à un compilateur Python en Rust :
-
-```
-Source Python → Lexer → Parser → AST → IR (optionnel) → LLVM IR → Code natif
-              └────── rustpython-parser ──────┘   └── Inkwell ──┘
+Tagged: [1][11111111111][1][ tag (3 bits) ][   payload (48 bits)   ]
+         ▲       ▲        ▲        ▲                  ▲
+      sign   NaN exponent │     type tag        value / pointer
+                     quiet-NaN bit
 ```
 
-### Gestion du typage dynamique
+| Tag | Type | Payload |
+|-----|------|---------|
+| `0` | Integer | 48-bit signed value (±140 trillion) |
+| `1` | Boolean | 1-bit value |
+| `2` | String | 48-bit pointer |
+| `3` | List | 48-bit pointer |
+| — | Float | stored directly as `f64` |
 
-Trois stratégies possibles, classées par complexité croissante :
+This cuts each value from 16 bytes (tag + payload struct) to 8, keeps values cache-friendly, and reduces float type checks to a single bit test. Lists are heap-allocated with a length header at offset 0, so `len()` is O(1). See [`docs/architecture/`](docs/architecture/) for the full write-up.
 
-**Stratégie 1 : Types monomorphes (recommandée pour le POC)**
-- Tous les nombres sont `f64` (comme Kaleidoscope)
-- Pas de polymorphisme, erreur si types incompatibles
-- Simple à implémenter, performances optimales
+## Project Structure
 
-**Stratégie 2 : Tagged unions (boxed values)**
-```rust
-// Représentation en Rust
-enum DynamicValue {
-    Integer(i64),
-    Float(f64),
-    Boolean(bool),
-}
-
-// Représentation LLVM
-// %DynamicValue = type { i8, [8 x i8] }  // tag + payload
+```
+Rusthon/
+├── python-compiler/
+│   ├── src/
+│   │   ├── main.rs            # CLI entry point (file in → .ll + executable out)
+│   │   ├── lib.rs            # Library exports
+│   │   ├── parser.rs         # Python parsing (wraps rustpython-parser)
+│   │   ├── ast.rs            # Custom IR: IRExpr, IRStmt, BinOp, CmpOp, UnaryOp
+│   │   ├── lowering.rs       # Python AST → IR
+│   │   ├── codegen.rs        # IR → LLVM IR (NaN-boxing, two-pass, O2)
+│   │   ├── tagged_pointer.rs # NaN-boxing helpers
+│   │   ├── compiler/         # Codegen internals: generators, runtime, values
+│   │   └── error.rs          # Ariadne-based diagnostics
+│   ├── tests/                # ~174 snapshot tests (one file per feature)
+│   └── examples/             # Sample Python programs
+├── docs/                     # Architecture, getting started, limitations, roadmap
+└── CLAUDE.md                 # Contributor / agent guide
 ```
 
-Chaque opération vérifie les tags au runtime et dispatch vers le code approprié.
+## Testing
 
-**Stratégie 3 : Inférence de types à la compilation**
-Comme Numba : analyser le flux de données pour déduire les types concrets, spécialiser le code, fallback si échec.
+Tests use snapshot testing with [insta](https://insta.rs/): each test compiles a Python snippet and asserts on the generated LLVM IR.
 
-### Code generation LLVM pour arithmétique
-
-```rust
-use inkwell::context::Context;
-use inkwell::builder::Builder;
-use inkwell::FloatPredicate;
-
-fn compile_binary_op(
-    context: &Context,
-    builder: &Builder,
-    op: BinOp,
-    lhs: inkwell::values::FloatValue,
-    rhs: inkwell::values::FloatValue,
-) -> inkwell::values::FloatValue {
-    match op {
-        BinOp::Add => builder.build_float_add(lhs, rhs, "addtmp").unwrap(),
-        BinOp::Sub => builder.build_float_sub(lhs, rhs, "subtmp").unwrap(),
-        BinOp::Mul => builder.build_float_mul(lhs, rhs, "multmp").unwrap(),
-        BinOp::Div => builder.build_float_div(lhs, rhs, "divtmp").unwrap(),
-    }
-}
-
-// Comparaisons
-fn compile_comparison(builder: &Builder, lhs: FloatValue, rhs: FloatValue) -> IntValue {
-    builder.build_float_compare(FloatPredicate::OLT, lhs, rhs, "cmptmp").unwrap()
-}
-```
-
-### Génération de fonctions complètes
-
-```rust
-fn compile_function(
-    context: &Context,
-    module: &Module,
-    builder: &Builder,
-    name: &str,
-    params: &[String],
-    body: &[IRStmt],
-) -> Result<FunctionValue, String> {
-    let f64_type = context.f64_type();
-    
-    // Créer la signature : tous les params sont f64
-    let param_types: Vec<_> = params.iter().map(|_| f64_type.into()).collect();
-    let fn_type = f64_type.fn_type(&param_types, false);
-    let function = module.add_function(name, fn_type, None);
-    
-    // Nommer les paramètres
-    for (i, arg) in function.get_param_iter().enumerate() {
-        arg.into_float_value().set_name(&params[i]);
-    }
-    
-    // Créer le bloc d'entrée
-    let entry = context.append_basic_block(function, "entry");
-    builder.position_at_end(entry);
-    
-    // Table des symboles pour les variables locales
-    let mut variables: HashMap<String, FloatValue> = HashMap::new();
-    for (i, arg) in function.get_param_iter().enumerate() {
-        variables.insert(params[i].clone(), arg.into_float_value());
-    }
-    
-    // Compiler le corps
-    // ... compiler chaque statement
-    
-    Ok(function)
-}
-```
-
-### I/O : liaison avec la libc
-
-```rust
-use inkwell::module::Linkage;
-use inkwell::AddressSpace;
-
-fn add_printf(context: &Context, module: &Module) {
-    let i32_type = context.i32_type();
-    let i8_ptr = context.i8_type().ptr_type(AddressSpace::default());
-    
-    // int printf(const char* format, ...)
-    let printf_type = i32_type.fn_type(&[i8_ptr.into()], true); // varargs
-    module.add_function("printf", printf_type, Some(Linkage::External));
-}
-
-fn build_print(builder: &Builder, module: &Module, value: FloatValue) {
-    let printf = module.get_function("printf").unwrap();
-    let format = builder.build_global_string_ptr("%f\n", "fmt").unwrap();
-    
-    builder.build_call(
-        printf,
-        &[format.as_pointer_value().into(), value.into()],
-        "printf_call"
-    ).unwrap();
-}
-```
-
----
-
-## Tutoriels et ressources essentielles
-
-### Ressources primaires
-
-- **Kaleidoscope en Rust avec Inkwell** : implémentation complète dans `inkwell/examples/kaleidoscope/`
-- **"Create Your Own Programming Language with Rust"** : createlang.rs - le guide le plus complet
-- **LLVM Tutorial adapté** : github.com/acolite-d/llvm-tutorial-in-rust-using-inkwell
-- **Iron Kaleidoscope** : github.com/jauhien/iron-kaleidoscope
-
-### Documentation technique
-
-- **Inkwell docs** : thedan64.github.io/inkwell/
-- **LLVM Language Reference** : llvm.org/docs/LangRef.html (indispensable pour comprendre l'IR)
-- **AOSA Book - LLVM** : aosabook.org/en/v1/llvm.html (architecture de LLVM expliquée)
-
-### L'approche Ghuloum
-
-Le paper "An Incremental Approach to Compiler Construction" de Abdulaziz Ghuloum est fondamental. **Principe clé** : ne pas construire lexer → parser → codegen séquentiellement, mais plutôt en "tranches verticales" end-to-end.
-
----
-
-## Plan d'action POC : 3 semaines
-
-### Semaine 1 : fondations et premier compilateur fonctionnel
-
-**Jours 1-2 : Setup**
 ```bash
-# Installation LLVM (macOS)
-brew install llvm@18
-export LLVM_SYS_180_PREFIX=$(brew --prefix llvm@18)
+cd python-compiler
 
-# Création du projet
-cargo new python-compiler && cd python-compiler
+# Run the whole suite
+cargo test
+
+# Run a single feature's tests
+cargo test --test control_flow
+
+# Review pending snapshot changes
+cargo insta review
+
+# Accept snapshot changes (only when the new output is correct)
+cargo insta test --accept
 ```
 
-**Jours 3-4 : print(42) fonctionne**
-- Parser minimal (rustpython-parser)
-- Codegen pour les entiers littéraux
-- Liaison avec printf
-- **Test** : `./compiler "print(42)"` → affiche "42"
+Before opening a PR, mirror what CI checks:
 
-**Jours 5-7 : Arithmétique complète**
-- Opérateurs `+ - * / %`
-- Précédence des opérateurs
-- **Test** : `print(1 + 2 * 3)` → "7"
-
-### Semaine 2 : variables et fonctions
-
-**Jours 8-9 : Variables**
-```python
-# Objectif
-x = 5
-y = x + 3
-print(y)  # → 8
-```
-- Table des symboles
-- Allocation stack (alloca LLVM)
-
-**Jours 10-12 : Fonctions**
-```python
-# Objectif
-def add(a, b):
-    return a + b
-
-print(add(1, 2))  # → 3
-```
-- Déclaration de fonctions
-- Passage de paramètres
-- Return
-
-**Jours 13-14 : Types flottants**
-- Support des floats (`3.14`)
-- Arithmétique mixte int/float
-
-### Semaine 3 : I/O et finalisation
-
-**Jours 15-16 : Input**
-```python
-x = input()
-print(x)
-```
-- FFI vers getchar/scanf
-- Conversion string → nombre (optionnel)
-
-**Jours 17-18 : Gestion d'erreurs**
-- Messages d'erreur avec ligne/colonne
-- Erreurs de type claires
-
-**Jours 19-21 : Tests et documentation**
-- 50+ tests couvrant toutes les features
-- Snapshot tests pour l'IR généré (crate `insta`)
-- README avec exemples
-- Liste des limitations documentée
-
-### Structure du projet recommandée
-
-```
-python-compiler/
-├── Cargo.toml
-├── src/
-│   ├── main.rs           # CLI
-│   ├── lexer.rs          # Tokenization (ou utiliser rustpython-parser)
-│   ├── parser.rs         # AST depuis rustpython-parser
-│   ├── ast.rs            # IR simplifiée
-│   ├── lowering.rs       # AST Python → IR
-│   ├── codegen.rs        # IR → LLVM IR (Inkwell)
-│   └── compiler.rs       # Orchestration
-└── tests/
-    ├── arithmetic.rs
-    ├── variables.rs
-    └── functions.rs
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
 ```
 
-### Cargo.toml complet
+## Documentation
 
-```toml
-[package]
-name = "python-compiler"
-version = "0.1.0"
-edition = "2021"
+More detailed docs live in [`docs/`](docs/):
 
-[dependencies]
-inkwell = { version = "0.7.0", features = ["llvm18-0"] }
-rustpython-parser = "0.4"
-thiserror = "1.0"
-ariadne = "0.4"     # Messages d'erreur élégants
+- [Getting Started](docs/getting-started/) — install and first program
+- [Architecture](docs/architecture/) — compilation, memory model, optimizations, types
+- [Language Features](docs/language-features/) — full feature reference
+- [Limitations](docs/limitations.md) — what isn't supported (and why)
+- [Roadmap](docs/roadmap.md) — planned work
+- [Testing](docs/testing/) — how to run and write tests
 
-[dev-dependencies]
-insta = "1.34"      # Snapshot testing
-```
+## Limitations
 
----
+Rusthon is an educational compiler for a deliberately restricted subset of Python. It does **not** currently support:
 
-## Milestones et critères de succès
+- Classes, objects, and methods
+- Dictionaries and tuples
+- `elif` chains (use nested `if`/`else`)
+- List comprehensions, generators, and lambdas
+- Exceptions (`try`/`except`)
+- Modules and imports
+- String concatenation and string methods
+- Loops with a `range` step argument (`range(0, 10, 2)`)
 
-| Milestone | Critère de validation |
-|-----------|----------------------|
-| M1 : Setup | `cargo build` réussit avec LLVM linké |
-| M2 : Hello World | `print(42)` produit un exécutable fonctionnel |
-| M3 : Arithmétique | `print((1+2)*3-4/2)` → résultat correct |
-| M4 : Variables | `x=5; y=x+1; print(y)` → "6" |
-| M5 : Fonctions | `def f(x): return x*2; print(f(21))` → "42" |
-| M6 : Floats | `print(3.14 + 1.0)` → "4.14" |
-| M7 : I/O | `x=input(); print(x)` → fonctionne |
-| M8 : POC complet | 50+ tests passent, documentation prête |
+Strings and lists are heap-allocated and freed conservatively, so long-running programs that allocate heavily may leak. See [`docs/limitations.md`](docs/limitations.md) for the complete list and workarounds.
 
-### Pièges à éviter
+## Contributing
 
-- **Scope creep** : Définir explicitement ce qui est hors-scope (classes, modules, exceptions, list comprehensions)
-- **Over-engineering l'AST** : Commencer avec 5-6 types de nœuds, pas 50
-- **`.unwrap()` partout** : Utiliser `Result<T, CompileError>` dès le départ avec `thiserror`
-- **Pas de tests** : Écrire le test AVANT la feature (TDD)
-- **Construire séquentiellement** : Toujours avoir un compilateur fonctionnel, même limité
+Contributions are welcome!
 
-Ce POC pose les fondations pour l'objectif final : un framework de tests Python compilé en code natif pour une exécution rapide. Une fois le sous-ensemble arithmétique et fonctions stabilisé, l'extension vers des constructs de test (`assert`, comparaisons, structures de données) devient incrémentale.
+1. Fork the repository and create a feature branch.
+2. Make your changes **with tests** (add or update snapshot tests for new behavior).
+3. Make sure `cargo fmt`, `cargo clippy`, and `cargo test` all pass.
+4. Open a pull request describing the change.
+
+See [`CLAUDE.md`](CLAUDE.md) for a deep dive into the architecture, coding conventions, and common tasks (adding an operator, adding a statement type, updating snapshots, etc.).
+
+## License
+
+Rusthon is released under the [MIT License](https://opensource.org/licenses/MIT).
+
+## Acknowledgements
+
+Built on the shoulders of:
+
+- [Inkwell](https://github.com/TheDan64/inkwell) — safe Rust bindings to LLVM
+- [rustpython-parser](https://github.com/RustPython/RustPython) — the Python parser
+- [ariadne](https://github.com/zesterer/ariadne) — beautiful diagnostics
+- [insta](https://insta.rs/) — snapshot testing
+
+Inspired by prior art in Python compilation such as [Numba](https://numba.pydata.org/), [Codon](https://github.com/exaloop/codon), and the [LLVM Kaleidoscope](https://llvm.org/docs/tutorial/) tutorial.
