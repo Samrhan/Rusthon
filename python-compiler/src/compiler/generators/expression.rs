@@ -230,7 +230,7 @@ pub fn compile_unary_op<'ctx>(
 // List Operations
 // ============================================================================
 
-/// Compiles a list literal expression [a, b, c]
+/// Compiles a list literal expression `[a, b, c]`
 pub fn compile_list<'ctx>(
     compiler: &mut Compiler<'ctx>,
     elements: &[IRExpr],
@@ -311,7 +311,7 @@ pub fn compile_list<'ctx>(
     Ok(compiler.create_pyobject_list(list_ptr, list_len))
 }
 
-/// Compiles a list indexing expression list[index]
+/// Compiles a list indexing expression `list[index]`
 pub fn compile_index<'ctx>(
     compiler: &mut Compiler<'ctx>,
     list: &IRExpr,
