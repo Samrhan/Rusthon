@@ -1,4 +1,5 @@
 use crate::ast::{BinOp, IRExpr, IRStmt};
+use crate::compiler::arrayness::ArraynessInfo;
 use crate::compiler::generators::{expression, module, statement};
 use crate::compiler::runtime::{FormatStrings, Runtime};
 use crate::compiler::values::{ValueManager, TYPE_TAG_INT, TYPE_TAG_STRING};
@@ -55,6 +56,10 @@ pub struct Compiler<'ctx> {
     pub(crate) format_strings: FormatStrings<'ctx>,
     // Value manager for NaN-boxing operations
     pub(crate) values: ValueManager<'ctx>,
+    // Interprocedural arrayness facts (which functions return arrays / take
+    // array parameters), computed once up front. Lets `expr_may_be_array` and
+    // function-body compilation flow arrayness across call boundaries.
+    pub(crate) arrayness: ArraynessInfo,
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -78,6 +83,7 @@ impl<'ctx> Compiler<'ctx> {
             runtime,
             format_strings,
             values,
+            arrayness: ArraynessInfo::default(),
         }
     }
 
@@ -250,6 +256,10 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub fn compile_program(mut self, program: &[IRStmt]) -> Result<String, CodeGenError> {
+        // Compute interprocedural arrayness facts up front so array values can
+        // flow through function parameters and return values.
+        self.arrayness = crate::compiler::arrayness::analyze(program);
+
         // Separate function definitions from top-level statements
         let (functions, top_level): (Vec<_>, Vec<_>) = program
             .iter()
@@ -634,9 +644,18 @@ impl<'ctx> Compiler<'ctx> {
         // Save current variable scope
         let saved_variables = self.variables.clone();
         self.variables.clear();
-        // Parameters are treated as scalar (arrays don't cross function
-        // boundaries yet), so array tracking starts empty in a function body.
+        // Array tracking starts fresh in a function body, seeded with the
+        // parameters the interprocedural analysis found may receive an array.
         let saved_array_vars = std::mem::take(&mut self.maybe_array_vars);
+        let array_params: Vec<String> = params
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.arrayness.param_is_array(name, *i))
+            .map(|(_, p)| p.clone())
+            .collect();
+        for param in array_params {
+            self.maybe_array_vars.insert(param);
+        }
 
         // Set up parameters as local variables
         for (i, param_name) in params.iter().enumerate() {
@@ -673,11 +692,10 @@ impl<'ctx> Compiler<'ctx> {
     /// that could possibly be an array (a false negative would miscompile array
     /// code), while `false` simply means "definitely scalar, skip the array
     /// machinery". The set of array producers is closed and small: NumPy
-    /// constructors, element-wise arithmetic with an array operand, and
-    /// variables already known to (maybe) hold an array.
-    ///
-    /// Arrays do not yet flow across user-defined function boundaries, so
-    /// user `Call` results and function parameters are treated as scalar.
+    /// constructors, slices, element-wise arithmetic with an array operand,
+    /// variables already known to (maybe) hold an array, and calls to functions
+    /// the interprocedural analysis found to return arrays. Array parameters are
+    /// seeded into `maybe_array_vars` when a function body is compiled.
     pub(crate) fn expr_may_be_array(&self, expr: &IRExpr) -> bool {
         match expr {
             IRExpr::ModuleCall { module, func, .. } => {
@@ -692,6 +710,8 @@ impl<'ctx> Compiler<'ctx> {
             IRExpr::Variable(name) => self.maybe_array_vars.contains(name),
             // Slicing an array yields an array.
             IRExpr::Slice { .. } => true,
+            // A call whose callee may return an array (interprocedural fact).
+            IRExpr::Call { func, .. } => self.arrayness.call_returns_array(func),
             _ => false,
         }
     }

@@ -101,10 +101,21 @@ print(a)                  # [9. 1. 2. 3. 4. 5.]
 print(a.max(), a.min())   # reductions
 ```
 
+**Phase 3 — arrays through functions** ✅ Done
+```python
+import numpy as np
+def normalize(v):
+    return v / v.sum()        # array parameter in, array out
+print(normalize(np.arange(4)))
+```
+A whole-program "arrayness" analysis (monotonic fixpoint over
+`array_returning` / `array_params`) propagates array-ness through function
+parameters and return values — transitively and through recursion — with no
+annotations. Scalar code stays untouched (pay-as-you-go).
+
 **Next phases** 🔮 Planned
 - Additional dtypes (`int64`) tracked in the array header.
 - Boolean/fancy indexing, negative indices, slice assignment (`a[i:j] = ...`).
-- Arrays across user-defined function parameters and return values.
 - Multi-dimensional arrays (`ndim`/shape/strides), `reshape`, `.T`.
 - Linear algebra (`np.dot`, `@`), more ufuncs (`np.sqrt`, …).
 

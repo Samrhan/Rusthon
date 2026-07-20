@@ -60,6 +60,7 @@ Python Source → Parser → AST → Lowering → IR → CodeGen → LLVM IR →
 - **String cleanup**: only tracks strings allocated in the main entry block
 - Codegen is split across modules:
   - `codegen.rs` — the `Compiler` driver and two-pass orchestration
+  - `compiler/arrayness.rs` — interprocedural analysis flowing NumPy array-ness through function params/returns
   - `compiler/values.rs` — the NaN-boxing value system (`ValueManager`)
   - `compiler/runtime.rs` — external C functions and format strings
   - `compiler/generators/expression.rs` — expression compilation
@@ -146,7 +147,8 @@ Value:   3         10          20          30
 | `ast.rs` | IR definitions | `IRExpr`, `IRStmt`, `BinOp`, `CmpOp`, `UnaryOp` |
 | `lowering.rs` | AST → IR | `lower_program()`, `lower_statement()`, `lower_expression()` |
 | `codegen.rs` | Compilation driver | `Compiler`, `compile_program()`, two-pass orchestration |
-| `compiler/mod.rs` | Codegen submodule root | Re-exports generators/runtime/values |
+| `compiler/mod.rs` | Codegen submodule root | Re-exports arrayness/generators/runtime/values |
+| `compiler/arrayness.rs` | Interprocedural arrayness analysis | `analyze`, `ArraynessInfo` (arrays through function params/returns) |
 | `compiler/values.rs` | NaN-boxing value system | `ValueManager`, type tags & constants |
 | `compiler/runtime.rs` | Runtime intrinsics | `Runtime`, `FormatStrings` (printf/scanf/malloc/…) |
 | `compiler/generators/expression.rs` | Expression codegen | `compile_binary_op`, `compile_comparison`, list/index/len/call helpers |
@@ -174,13 +176,13 @@ Value:   3         10          20          30
 | `integration.rs` | End-to-end scenarios | 4 |
 | `lists.rs` | List operations | 6 |
 | `minimal_test.rs` | Smoke test | 1 |
-| `numpy.rs` | NumPy subset (arrays, module system) | 18 |
+| `numpy.rs` | NumPy subset (arrays, module system) | 21 |
 | `precedence.rs` | Operator precedence | 18 |
 | `strings.rs` | String operations | 28 |
 | `unary.rs` | Unary operators | 15 |
 | `variables.rs` | Variable assignment | 3 |
 
-**Total**: 202 tests
+**Total**: 205 tests
 
 ### Documentation (`docs/`)
 

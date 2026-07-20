@@ -10,6 +10,7 @@
 //! ## Refactoring Progress
 //! See `/REFACTORING_PROGRESS.md` for detailed progress and next steps.
 
+pub mod arrayness;
 pub mod generators;
 pub mod runtime;
 pub mod values;

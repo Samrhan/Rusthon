@@ -171,8 +171,95 @@ s = a[:]
 }
 
 // ---------------------------------------------------------------------------
+// Interprocedural arrayness analysis
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_arrayness_analysis_flows_through_functions() {
+    let source = r#"
+import numpy as np
+def scale(v, k):
+    return v * k
+def total(v):
+    return v.sum()
+def add(a, b):
+    return a + b
+arr = np.array([1.0, 2.0, 3.0])
+b = scale(arr, 2.0)
+print(total(b))
+print(add(2, 3))
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let info = compiler::arrayness::analyze(&ir);
+
+    // `scale(v, k)` returns `v * k` with an array `v` → returns an array.
+    assert!(info.call_returns_array("scale"), "scale returns an array");
+    assert!(info.param_is_array("scale", 0), "scale.v may be an array");
+    assert!(!info.param_is_array("scale", 1), "scale.k is scalar");
+
+    // `total(v)` returns `v.sum()` → a scalar, but takes an array parameter.
+    assert!(!info.call_returns_array("total"), "total returns a scalar");
+    assert!(info.param_is_array("total", 0), "total.v may be an array");
+
+    // `add` is only ever called with scalars → untouched.
+    assert!(!info.call_returns_array("add"), "add returns a scalar");
+    assert!(!info.param_is_array("add", 0), "add.a is scalar");
+    assert!(!info.param_is_array("add", 1), "add.b is scalar");
+}
+
+#[test]
+fn test_arrayness_analysis_transitive_and_recursive() {
+    let source = r#"
+import numpy as np
+def make(n):
+    return np.arange(n)
+def double(v):
+    return v * 2
+def make_doubled(n):
+    return double(make(n))
+def grow(v, k):
+    if k <= 0:
+        return v
+    return grow(v + 1, k - 1)
+d = make_doubled(4)
+r = grow(np.zeros(3), 2)
+print(d.sum())
+print(r.sum())
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+    let info = compiler::arrayness::analyze(&ir);
+
+    // Arrayness propagates transitively: make -> double -> make_doubled.
+    assert!(info.call_returns_array("make"));
+    assert!(info.call_returns_array("double"));
+    assert!(info.call_returns_array("make_doubled"));
+    assert!(info.param_is_array("double", 0));
+    // And through recursion: grow takes and returns an array.
+    assert!(info.param_is_array("grow", 0));
+    assert!(info.call_returns_array("grow"));
+}
+
+// ---------------------------------------------------------------------------
 // Codegen snapshots
 // ---------------------------------------------------------------------------
+
+#[test]
+fn test_array_flows_through_functions() {
+    let source = r#"
+import numpy as np
+def scale(v, k):
+    return v * k
+def total(v):
+    return v.sum()
+a = np.array([1.0, 2.0, 3.0])
+b = scale(a, 2.0)
+print(b[0])
+print(total(b))
+"#;
+    insta::assert_snapshot!(compile(source));
+}
 
 #[test]
 fn test_array_creation_and_indexing() {

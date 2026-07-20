@@ -407,12 +407,14 @@ a[0] = 9.0                       # item assignment
 s = a[0:2]                       # copy-slicing
 print(a)                         # [9.000000 2.000000 3.000000]
 
+# ✅ Also supported: arrays through user functions (params & returns)
+def scale(v): return v * 2
+print(scale(a).sum())
+
 # ❌ Not supported yet
 m = np.array([[1.0, 2.0]])       # multi-dimensional arrays
 a[0:2] = b                       # slice assignment
 x = np.int64                     # dtypes other than float64
-def scale(v): return v * 2       # arrays through function params / returns
-scale(a)                         #   -> unsupported
 ```
 
 ### Error Handling

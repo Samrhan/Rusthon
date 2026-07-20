@@ -1,0 +1,530 @@
+---
+source: tests/numpy.rs
+expression: compile(source)
+---
+; ModuleID = 'main'
+source_filename = "main"
+
+@int_format_string.1 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@float_format_string.2 = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1
+
+; Function Attrs: nofree nounwind memory(readwrite, argmem: read)
+define i64 @scale(i64 %0, i64 %1) local_unnamed_addr #0 {
+entry:
+  %array_tag_bits = and i64 %0, 9223090561878065152
+  %is_array = icmp eq i64 %array_tag_bits, 9222246136947933184
+  %array_tag_bits3 = and i64 %1, 9223090561878065152
+  %is_array4 = icmp eq i64 %array_tag_bits3, 9222246136947933184
+  %any_array = or i1 %is_array, %is_array4
+  br i1 %any_array, label %binop_array, label %binop_scalar
+
+binop_array:                                      ; preds = %entry
+  %extract_arr_payload = and i64 %0, 281474976710655
+  %payload_to_arr_ptr = inttoptr i64 %extract_arr_payload to ptr
+  %data_ptr = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
+  %scalar_slot = alloca double, align 8
+  %check_qnan = and i64 %0, 9221120237041090560
+  %is_float.not = icmp eq i64 %check_qnan, 9221120237041090560
+  %i64_to_f64 = bitcast i64 %0 to double
+  %is_negative.not = icmp ult i64 %extract_arr_payload, 140737488355328
+  %masksel93 = select i1 %is_negative.not, i64 0, i64 -281474976710656
+  %signed_payload = or disjoint i64 %masksel93, %extract_arr_payload
+  %payload_to_f64 = sitofp i64 %signed_payload to double
+  %final_payload = select i1 %is_float.not, double %payload_to_f64, double %i64_to_f64
+  store double %final_payload, ptr %scalar_slot, align 8
+  %operand_ptr = select i1 %is_array, ptr %data_ptr, ptr %scalar_slot
+  %extract_arr_payload5 = and i64 %1, 281474976710655
+  %payload_to_arr_ptr6 = inttoptr i64 %extract_arr_payload5 to ptr
+  %data_ptr7 = getelementptr inbounds i64, ptr %payload_to_arr_ptr6, i64 3
+  %scalar_slot8 = alloca double, align 8
+  %check_qnan9 = and i64 %1, 9221120237041090560
+  %is_float10.not = icmp eq i64 %check_qnan9, 9221120237041090560
+  %i64_to_f6411 = bitcast i64 %1 to double
+  %is_negative14.not = icmp ult i64 %extract_arr_payload5, 140737488355328
+  %masksel94 = select i1 %is_negative14.not, i64 0, i64 -281474976710656
+  %signed_payload16 = or disjoint i64 %masksel94, %extract_arr_payload5
+  %payload_to_f6417 = sitofp i64 %signed_payload16 to double
+  %final_payload18 = select i1 %is_float10.not, double %payload_to_f6417, double %i64_to_f6411
+  store double %final_payload18, ptr %scalar_slot8, align 8
+  %operand_ptr19 = select i1 %is_array4, ptr %data_ptr7, ptr %scalar_slot8
+  %payload_to_arr_ptr.payload_to_arr_ptr6 = select i1 %is_array, ptr %payload_to_arr_ptr, ptr %payload_to_arr_ptr6
+  %arr_length.in = getelementptr inbounds i64, ptr %payload_to_arr_ptr.payload_to_arr_ptr6, i64 2
+  %arr_length = load i64, ptr %arr_length.in, align 4
+  %arr_words = shl i64 %arr_length, 3
+  %arr_bytes = add i64 %arr_words, 24
+  %malloc_arr = tail call ptr @malloc(i64 %arr_bytes)
+  store i64 0, ptr %malloc_arr, align 4
+  %hdr_ptr27 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
+  store i64 1, ptr %hdr_ptr27, align 4
+  %hdr_ptr28 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
+  store i64 %arr_length, ptr %hdr_ptr28, align 4
+  %data_ptr29 = getelementptr inbounds i64, ptr %malloc_arr, i64 3
+  %loop_cont95.not = icmp eq i64 %arr_length, 0
+  br i1 %loop_cont95.not, label %arr_loop_end, label %arr_loop_body.preheader
+
+arr_loop_body.preheader:                          ; preds = %binop_array
+  %xtraiter = and i64 %arr_length, 1
+  %2 = icmp eq i64 %arr_length, 1
+  br i1 %2, label %arr_loop_end.loopexit.unr-lcssa, label %arr_loop_body.preheader.new
+
+arr_loop_body.preheader.new:                      ; preds = %arr_loop_body.preheader
+  %unroll_iter = and i64 %arr_length, -2
+  br label %arr_loop_body
+
+binop_scalar:                                     ; preds = %entry
+  %check_qnan34 = and i64 %0, 9221120237041090560
+  %is_float35.not.not = icmp eq i64 %check_qnan34, 9221120237041090560
+  %check_qnan36 = and i64 %1, 9221120237041090560
+  %is_float37.not.not = icmp eq i64 %check_qnan36, 9221120237041090560
+  %i64_to_f6471 = bitcast i64 %0 to double
+  %extract_payload72 = and i64 %0, 281474976710655
+  %is_negative74.not = icmp ult i64 %extract_payload72, 140737488355328
+  %masksel = select i1 %is_negative74.not, i64 0, i64 -281474976710656
+  %signed_payload76 = or disjoint i64 %masksel, %extract_payload72
+  %payload_to_f6477 = sitofp i64 %signed_payload76 to double
+  %final_payload78 = select i1 %is_float35.not.not, double %payload_to_f6477, double %i64_to_f6471
+  %i64_to_f6481 = bitcast i64 %1 to double
+  %extract_payload82 = and i64 %1, 281474976710655
+  %is_negative84.not = icmp ult i64 %extract_payload82, 140737488355328
+  %masksel92 = select i1 %is_negative84.not, i64 0, i64 -281474976710656
+  %signed_payload86 = or disjoint i64 %masksel92, %extract_payload82
+  %payload_to_f6487 = sitofp i64 %signed_payload86 to double
+  %final_payload88 = select i1 %is_float37.not.not, double %payload_to_f6487, double %i64_to_f6481
+  %3 = and i64 %check_qnan34, %1
+  %result_is_float.not = icmp eq i64 %3, 9221120237041090560
+  %multmp = fmul double %final_payload78, %final_payload88
+  %float_to_i64 = bitcast double %multmp to i64
+  %payload_to_i64 = fptosi double %multmp to i64
+  %payload_masked = and i64 %payload_to_i64, 281474976710655
+  %nanboxed = or disjoint i64 %payload_masked, 9221120237041090560
+  %pyobject = select i1 %result_is_float.not, i64 %nanboxed, i64 %float_to_i64
+  br label %binop_merge
+
+binop_merge:                                      ; preds = %binop_scalar, %arr_loop_end
+  %binop_result = phi i64 [ %pyobject_array, %arr_loop_end ], [ %pyobject, %binop_scalar ]
+  ret i64 %binop_result
+
+arr_loop_body:                                    ; preds = %arr_loop_body, %arr_loop_body.preheader.new
+  %storemerge96 = phi i64 [ 0, %arr_loop_body.preheader.new ], [ %i_next.1, %arr_loop_body ]
+  %niter = phi i64 [ 0, %arr_loop_body.preheader.new ], [ %niter.next.1, %arr_loop_body ]
+  %off_l = select i1 %is_array, i64 %storemerge96, i64 0
+  %off_r = select i1 %is_array4, i64 %storemerge96, i64 0
+  %elem_ptr = getelementptr inbounds double, ptr %operand_ptr, i64 %off_l
+  %elem = load double, ptr %elem_ptr, align 8
+  %elem_ptr31 = getelementptr inbounds double, ptr %operand_ptr19, i64 %off_r
+  %elem32 = load double, ptr %elem_ptr31, align 8
+  %arr_mul = fmul double %elem, %elem32
+  %elem_ptr33 = getelementptr inbounds double, ptr %data_ptr29, i64 %storemerge96
+  store double %arr_mul, ptr %elem_ptr33, align 8
+  %i_next = or disjoint i64 %storemerge96, 1
+  %off_l.1 = select i1 %is_array, i64 %i_next, i64 0
+  %off_r.1 = select i1 %is_array4, i64 %i_next, i64 0
+  %elem_ptr.1 = getelementptr inbounds double, ptr %operand_ptr, i64 %off_l.1
+  %elem.1 = load double, ptr %elem_ptr.1, align 8
+  %elem_ptr31.1 = getelementptr inbounds double, ptr %operand_ptr19, i64 %off_r.1
+  %elem32.1 = load double, ptr %elem_ptr31.1, align 8
+  %arr_mul.1 = fmul double %elem.1, %elem32.1
+  %elem_ptr33.1 = getelementptr inbounds double, ptr %data_ptr29, i64 %i_next
+  store double %arr_mul.1, ptr %elem_ptr33.1, align 8
+  %i_next.1 = add nuw i64 %storemerge96, 2
+  %niter.next.1 = add i64 %niter, 2
+  %niter.ncmp.1.not = icmp eq i64 %niter.next.1, %unroll_iter
+  br i1 %niter.ncmp.1.not, label %arr_loop_end.loopexit.unr-lcssa, label %arr_loop_body
+
+arr_loop_end.loopexit.unr-lcssa:                  ; preds = %arr_loop_body, %arr_loop_body.preheader
+  %storemerge96.unr = phi i64 [ 0, %arr_loop_body.preheader ], [ %i_next.1, %arr_loop_body ]
+  %lcmp.mod.not = icmp eq i64 %xtraiter, 0
+  br i1 %lcmp.mod.not, label %arr_loop_end, label %arr_loop_body.epil
+
+arr_loop_body.epil:                               ; preds = %arr_loop_end.loopexit.unr-lcssa
+  %off_l.epil = select i1 %is_array, i64 %storemerge96.unr, i64 0
+  %off_r.epil = select i1 %is_array4, i64 %storemerge96.unr, i64 0
+  %elem_ptr.epil = getelementptr inbounds double, ptr %operand_ptr, i64 %off_l.epil
+  %elem.epil = load double, ptr %elem_ptr.epil, align 8
+  %elem_ptr31.epil = getelementptr inbounds double, ptr %operand_ptr19, i64 %off_r.epil
+  %elem32.epil = load double, ptr %elem_ptr31.epil, align 8
+  %arr_mul.epil = fmul double %elem.epil, %elem32.epil
+  %elem_ptr33.epil = getelementptr inbounds double, ptr %data_ptr29, i64 %storemerge96.unr
+  store double %arr_mul.epil, ptr %elem_ptr33.epil, align 8
+  br label %arr_loop_end
+
+arr_loop_end:                                     ; preds = %arr_loop_body.epil, %arr_loop_end.loopexit.unr-lcssa, %binop_array
+  %arr_ptr_to_int = ptrtoint ptr %malloc_arr to i64
+  %arr_ptr_payload = and i64 %arr_ptr_to_int, 281474976710655
+  %pyobject_array = or disjoint i64 %arr_ptr_payload, 9222246136947933184
+  br label %binop_merge
+}
+
+; Function Attrs: nofree norecurse nosync nounwind memory(read, inaccessiblemem: none)
+define i64 @total(i64 %0) local_unnamed_addr #1 {
+entry:
+  %extract_arr_payload = and i64 %0, 281474976710655
+  %payload_to_arr_ptr = inttoptr i64 %extract_arr_payload to ptr
+  %size_ptr = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 2
+  %arr_size = load i64, ptr %size_ptr, align 4
+  %data_ptr = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
+  %loop_cont4.not = icmp eq i64 %arr_size, 0
+  br i1 %loop_cont4.not, label %arr_loop_end, label %arr_loop_body.preheader
+
+arr_loop_body.preheader:                          ; preds = %entry
+  %xtraiter = and i64 %arr_size, 7
+  %1 = icmp ult i64 %arr_size, 8
+  br i1 %1, label %arr_loop_end.loopexit.unr-lcssa, label %arr_loop_body.preheader.new
+
+arr_loop_body.preheader.new:                      ; preds = %arr_loop_body.preheader
+  %unroll_iter = and i64 %arr_size, -8
+  br label %arr_loop_body
+
+arr_loop_body:                                    ; preds = %arr_loop_body, %arr_loop_body.preheader.new
+  %i.06 = phi i64 [ 0, %arr_loop_body.preheader.new ], [ %i_next.7, %arr_loop_body ]
+  %acc.05 = phi double [ 0.000000e+00, %arr_loop_body.preheader.new ], [ %acc_next.7, %arr_loop_body ]
+  %niter = phi i64 [ 0, %arr_loop_body.preheader.new ], [ %niter.next.7, %arr_loop_body ]
+  %elem_ptr = getelementptr inbounds double, ptr %data_ptr, i64 %i.06
+  %elem = load double, ptr %elem_ptr, align 8
+  %acc_next = fadd double %acc.05, %elem
+  %i_next = or disjoint i64 %i.06, 1
+  %elem_ptr.1 = getelementptr inbounds double, ptr %data_ptr, i64 %i_next
+  %elem.1 = load double, ptr %elem_ptr.1, align 8
+  %acc_next.1 = fadd double %acc_next, %elem.1
+  %i_next.1 = or disjoint i64 %i.06, 2
+  %elem_ptr.2 = getelementptr inbounds double, ptr %data_ptr, i64 %i_next.1
+  %elem.2 = load double, ptr %elem_ptr.2, align 8
+  %acc_next.2 = fadd double %acc_next.1, %elem.2
+  %i_next.2 = or disjoint i64 %i.06, 3
+  %elem_ptr.3 = getelementptr inbounds double, ptr %data_ptr, i64 %i_next.2
+  %elem.3 = load double, ptr %elem_ptr.3, align 8
+  %acc_next.3 = fadd double %acc_next.2, %elem.3
+  %i_next.3 = or disjoint i64 %i.06, 4
+  %elem_ptr.4 = getelementptr inbounds double, ptr %data_ptr, i64 %i_next.3
+  %elem.4 = load double, ptr %elem_ptr.4, align 8
+  %acc_next.4 = fadd double %acc_next.3, %elem.4
+  %i_next.4 = or disjoint i64 %i.06, 5
+  %elem_ptr.5 = getelementptr inbounds double, ptr %data_ptr, i64 %i_next.4
+  %elem.5 = load double, ptr %elem_ptr.5, align 8
+  %acc_next.5 = fadd double %acc_next.4, %elem.5
+  %i_next.5 = or disjoint i64 %i.06, 6
+  %elem_ptr.6 = getelementptr inbounds double, ptr %data_ptr, i64 %i_next.5
+  %elem.6 = load double, ptr %elem_ptr.6, align 8
+  %acc_next.6 = fadd double %acc_next.5, %elem.6
+  %i_next.6 = or disjoint i64 %i.06, 7
+  %elem_ptr.7 = getelementptr inbounds double, ptr %data_ptr, i64 %i_next.6
+  %elem.7 = load double, ptr %elem_ptr.7, align 8
+  %acc_next.7 = fadd double %acc_next.6, %elem.7
+  %i_next.7 = add nuw i64 %i.06, 8
+  %niter.next.7 = add i64 %niter, 8
+  %niter.ncmp.7.not = icmp eq i64 %niter.next.7, %unroll_iter
+  br i1 %niter.ncmp.7.not, label %arr_loop_end.loopexit.unr-lcssa, label %arr_loop_body
+
+arr_loop_end.loopexit.unr-lcssa:                  ; preds = %arr_loop_body, %arr_loop_body.preheader
+  %acc_next.lcssa.ph = phi double [ undef, %arr_loop_body.preheader ], [ %acc_next.7, %arr_loop_body ]
+  %i.06.unr = phi i64 [ 0, %arr_loop_body.preheader ], [ %i_next.7, %arr_loop_body ]
+  %acc.05.unr = phi double [ 0.000000e+00, %arr_loop_body.preheader ], [ %acc_next.7, %arr_loop_body ]
+  %lcmp.mod.not = icmp eq i64 %xtraiter, 0
+  br i1 %lcmp.mod.not, label %arr_loop_end.loopexit, label %arr_loop_body.epil
+
+arr_loop_body.epil:                               ; preds = %arr_loop_end.loopexit.unr-lcssa, %arr_loop_body.epil
+  %i.06.epil = phi i64 [ %i_next.epil, %arr_loop_body.epil ], [ %i.06.unr, %arr_loop_end.loopexit.unr-lcssa ]
+  %acc.05.epil = phi double [ %acc_next.epil, %arr_loop_body.epil ], [ %acc.05.unr, %arr_loop_end.loopexit.unr-lcssa ]
+  %epil.iter = phi i64 [ %epil.iter.next, %arr_loop_body.epil ], [ 0, %arr_loop_end.loopexit.unr-lcssa ]
+  %elem_ptr.epil = getelementptr inbounds double, ptr %data_ptr, i64 %i.06.epil
+  %elem.epil = load double, ptr %elem_ptr.epil, align 8
+  %acc_next.epil = fadd double %acc.05.epil, %elem.epil
+  %i_next.epil = add nuw i64 %i.06.epil, 1
+  %epil.iter.next = add i64 %epil.iter, 1
+  %epil.iter.cmp.not = icmp eq i64 %epil.iter.next, %xtraiter
+  br i1 %epil.iter.cmp.not, label %arr_loop_end.loopexit, label %arr_loop_body.epil, !llvm.loop !0
+
+arr_loop_end.loopexit:                            ; preds = %arr_loop_body.epil, %arr_loop_end.loopexit.unr-lcssa
+  %acc_next.lcssa = phi double [ %acc_next.lcssa.ph, %arr_loop_end.loopexit.unr-lcssa ], [ %acc_next.epil, %arr_loop_body.epil ]
+  %2 = bitcast double %acc_next.lcssa to i64
+  br label %arr_loop_end
+
+arr_loop_end:                                     ; preds = %arr_loop_end.loopexit, %entry
+  %acc.0.lcssa = phi i64 [ 0, %entry ], [ %2, %arr_loop_end.loopexit ]
+  ret i64 %acc.0.lcssa
+}
+
+; Function Attrs: mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite)
+declare noalias noundef ptr @malloc(i64 noundef) local_unnamed_addr #2
+
+; Function Attrs: nofree nounwind
+define noundef i32 @main() local_unnamed_addr #3 {
+entry:
+  %malloc_list = tail call dereferenceable_or_null(32) ptr @malloc(i64 32)
+  store i64 3, ptr %malloc_list, align 4
+  %elem_ptr_0 = getelementptr inbounds i64, ptr %malloc_list, i64 1
+  store i64 4607182418800017408, ptr %elem_ptr_0, align 4
+  %elem_ptr_1 = getelementptr inbounds i64, ptr %malloc_list, i64 2
+  store i64 4611686018427387904, ptr %elem_ptr_1, align 4
+  %elem_ptr_2 = getelementptr inbounds i64, ptr %malloc_list, i64 3
+  store i64 4613937818241073152, ptr %elem_ptr_2, align 4
+  %ptr_to_int = ptrtoint ptr %malloc_list to i64
+  %list_ptr_payload = and i64 %ptr_to_int, 281474976710655
+  %payload_to_list_ptr = inttoptr i64 %list_ptr_payload to ptr
+  %list_len = load i64, ptr %payload_to_list_ptr, align 4
+  %arr_words = shl i64 %list_len, 3
+  %arr_bytes = add i64 %arr_words, 24
+  %malloc_arr = tail call ptr @malloc(i64 %arr_bytes)
+  %malloc_arr73 = ptrtoint ptr %malloc_arr to i64
+  store i64 0, ptr %malloc_arr, align 4
+  %hdr_ptr2 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
+  store i64 1, ptr %hdr_ptr2, align 4
+  %hdr_ptr3 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
+  store i64 %list_len, ptr %hdr_ptr3, align 4
+  %data_ptr = getelementptr inbounds i64, ptr %malloc_arr, i64 3
+  %loop_cont71.not = icmp eq i64 %list_len, 0
+  br i1 %loop_cont71.not, label %arr_loop_end, label %arr_loop_body.preheader
+
+arr_loop_body.preheader:                          ; preds = %entry
+  %min.iters.check = icmp ult i64 %list_len, 6
+  br i1 %min.iters.check, label %arr_loop_body.preheader74, label %vector.memcheck
+
+vector.memcheck:                                  ; preds = %arr_loop_body.preheader
+  %0 = add i64 %malloc_arr73, 16
+  %1 = sub i64 %0, %list_ptr_payload
+  %diff.check = icmp ult i64 %1, 16
+  br i1 %diff.check, label %arr_loop_body.preheader74, label %vector.ph
+
+vector.ph:                                        ; preds = %vector.memcheck
+  %n.vec = and i64 %list_len, -2
+  br label %vector.body
+
+vector.body:                                      ; preds = %vector.body, %vector.ph
+  %index = phi i64 [ 0, %vector.ph ], [ %index.next, %vector.body ]
+  %2 = or disjoint i64 %index, 1
+  %3 = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 %2
+  %wide.load = load <2 x i64>, ptr %3, align 4
+  %4 = and <2 x i64> %wide.load, <i64 9221120237041090560, i64 9221120237041090560>
+  %5 = icmp eq <2 x i64> %4, <i64 9221120237041090560, i64 9221120237041090560>
+  %6 = bitcast <2 x i64> %wide.load to <2 x double>
+  %7 = and <2 x i64> %wide.load, <i64 281474976710655, i64 281474976710655>
+  %8 = icmp ult <2 x i64> %7, <i64 140737488355328, i64 140737488355328>
+  %9 = select <2 x i1> %8, <2 x i64> zeroinitializer, <2 x i64> <i64 -281474976710656, i64 -281474976710656>
+  %10 = or disjoint <2 x i64> %9, %7
+  %11 = sitofp <2 x i64> %10 to <2 x double>
+  %12 = select <2 x i1> %5, <2 x double> %11, <2 x double> %6
+  %13 = getelementptr inbounds double, ptr %data_ptr, i64 %index
+  store <2 x double> %12, ptr %13, align 8
+  %index.next = add nuw i64 %index, 2
+  %14 = icmp eq i64 %index.next, %n.vec
+  br i1 %14, label %middle.block, label %vector.body, !llvm.loop !2
+
+middle.block:                                     ; preds = %vector.body
+  %cmp.n = icmp eq i64 %list_len, %n.vec
+  br i1 %cmp.n, label %arr_loop_end, label %arr_loop_body.preheader74
+
+arr_loop_body.preheader74:                        ; preds = %vector.memcheck, %arr_loop_body.preheader, %middle.block
+  %i.072.ph = phi i64 [ 0, %vector.memcheck ], [ 0, %arr_loop_body.preheader ], [ %n.vec, %middle.block ]
+  br label %arr_loop_body
+
+arr_loop_body:                                    ; preds = %arr_loop_body.preheader74, %arr_loop_body
+  %i.072 = phi i64 [ %list_idx, %arr_loop_body ], [ %i.072.ph, %arr_loop_body.preheader74 ]
+  %list_idx = add nuw i64 %i.072, 1
+  %list_elem_ptr = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 %list_idx
+  %boxed_elem = load i64, ptr %list_elem_ptr, align 4
+  %check_qnan = and i64 %boxed_elem, 9221120237041090560
+  %is_float.not = icmp eq i64 %check_qnan, 9221120237041090560
+  %i64_to_f64 = bitcast i64 %boxed_elem to double
+  %extract_payload = and i64 %boxed_elem, 281474976710655
+  %is_negative.not = icmp ult i64 %extract_payload, 140737488355328
+  %masksel70 = select i1 %is_negative.not, i64 0, i64 -281474976710656
+  %signed_payload = or disjoint i64 %masksel70, %extract_payload
+  %payload_to_f64 = sitofp i64 %signed_payload to double
+  %final_payload = select i1 %is_float.not, double %payload_to_f64, double %i64_to_f64
+  %elem_ptr = getelementptr inbounds double, ptr %data_ptr, i64 %i.072
+  store double %final_payload, ptr %elem_ptr, align 8
+  %loop_cont = icmp ult i64 %list_idx, %list_len
+  br i1 %loop_cont, label %arr_loop_body, label %arr_loop_end, !llvm.loop !5
+
+arr_loop_end:                                     ; preds = %arr_loop_body, %middle.block, %entry
+  %arr_ptr_to_int = ptrtoint ptr %malloc_arr to i64
+  %arr_ptr_payload = and i64 %arr_ptr_to_int, 281474976710655
+  %pyobject_array = or disjoint i64 %arr_ptr_payload, 9222246136947933184
+  %calltmp = tail call i64 @scale(i64 %pyobject_array, i64 4611686018427387904)
+  %array_tag_bits = and i64 %calltmp, 9223090561878065152
+  %is_array = icmp eq i64 %array_tag_bits, 9222246136947933184
+  %extract_arr_payload = and i64 %calltmp, 281474976710655
+  %payload_to_arr_ptr = inttoptr i64 %extract_arr_payload to ptr
+  %data_ptr7 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
+  %elem_ptr13 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 1
+  %index_result.in = select i1 %is_array, ptr %data_ptr7, ptr %elem_ptr13
+  %index_result = load i64, ptr %index_result.in, align 4
+  %check_qnan15 = and i64 %index_result, 9221120237041090560
+  %is_float16.not = icmp eq i64 %check_qnan15, 9221120237041090560
+  %tag_bits = lshr i64 %index_result, 48
+  %tag = and i64 %tag_bits, 7
+  %is_bool = icmp eq i64 %tag, 1
+  %is_string = icmp eq i64 %tag, 2
+  %is_list = icmp eq i64 %tag, 3
+  %15 = trunc i64 %tag_bits to i3
+  %16 = select i1 %is_bool, i3 2, i3 %15
+  %17 = select i1 %is_string, i3 3, i3 %16
+  %18 = select i1 %is_list, i3 -4, i3 %17
+  %i64_to_f6419 = bitcast i64 %index_result to double
+  %extract_payload20 = and i64 %index_result, 281474976710655
+  %is_negative22.not = icmp ult i64 %extract_payload20, 140737488355328
+  %masksel = select i1 %is_negative22.not, i64 0, i64 -281474976710656
+  %signed_payload24 = or disjoint i64 %masksel, %extract_payload20
+  %payload_to_f6425 = sitofp i64 %signed_payload24 to double
+  %final_payload26 = select i1 %is_float16.not, double %payload_to_f6425, double %i64_to_f6419
+  %trunc = select i1 %is_float16.not, i3 %18, i3 1
+  switch i3 %trunc, label %print_float [
+    i3 3, label %print_string
+    i3 0, label %print_int
+  ]
+
+print_int:                                        ; preds = %arr_loop_end
+  %to_int = fptosi double %final_payload26 to i64
+  %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int)
+  br label %print_end
+
+print_float:                                      ; preds = %arr_loop_end
+  %printf_float = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.2, double %final_payload26)
+  br label %print_end
+
+print_string:                                     ; preds = %arr_loop_end
+  %payload_to_ptr = inttoptr i64 %extract_payload20 to ptr
+  %puts = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr)
+  br label %print_end
+
+print_end:                                        ; preds = %print_string, %print_float, %print_int
+  %size_ptr.i = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 2
+  %arr_size.i = load i64, ptr %size_ptr.i, align 4
+  %loop_cont4.not.i = icmp eq i64 %arr_size.i, 0
+  br i1 %loop_cont4.not.i, label %total.exit, label %arr_loop_body.i.preheader
+
+arr_loop_body.i.preheader:                        ; preds = %print_end
+  %xtraiter = and i64 %arr_size.i, 7
+  %19 = icmp ult i64 %arr_size.i, 8
+  br i1 %19, label %arr_loop_end.loopexit.i.unr-lcssa, label %arr_loop_body.i.preheader.new
+
+arr_loop_body.i.preheader.new:                    ; preds = %arr_loop_body.i.preheader
+  %unroll_iter = and i64 %arr_size.i, -8
+  br label %arr_loop_body.i
+
+arr_loop_body.i:                                  ; preds = %arr_loop_body.i, %arr_loop_body.i.preheader.new
+  %i.06.i = phi i64 [ 0, %arr_loop_body.i.preheader.new ], [ %i_next.i.7, %arr_loop_body.i ]
+  %acc.05.i = phi double [ 0.000000e+00, %arr_loop_body.i.preheader.new ], [ %acc_next.i.7, %arr_loop_body.i ]
+  %niter = phi i64 [ 0, %arr_loop_body.i.preheader.new ], [ %niter.next.7, %arr_loop_body.i ]
+  %elem_ptr.i = getelementptr inbounds double, ptr %data_ptr7, i64 %i.06.i
+  %elem.i = load double, ptr %elem_ptr.i, align 8
+  %acc_next.i = fadd double %acc.05.i, %elem.i
+  %i_next.i = or disjoint i64 %i.06.i, 1
+  %elem_ptr.i.1 = getelementptr inbounds double, ptr %data_ptr7, i64 %i_next.i
+  %elem.i.1 = load double, ptr %elem_ptr.i.1, align 8
+  %acc_next.i.1 = fadd double %acc_next.i, %elem.i.1
+  %i_next.i.1 = or disjoint i64 %i.06.i, 2
+  %elem_ptr.i.2 = getelementptr inbounds double, ptr %data_ptr7, i64 %i_next.i.1
+  %elem.i.2 = load double, ptr %elem_ptr.i.2, align 8
+  %acc_next.i.2 = fadd double %acc_next.i.1, %elem.i.2
+  %i_next.i.2 = or disjoint i64 %i.06.i, 3
+  %elem_ptr.i.3 = getelementptr inbounds double, ptr %data_ptr7, i64 %i_next.i.2
+  %elem.i.3 = load double, ptr %elem_ptr.i.3, align 8
+  %acc_next.i.3 = fadd double %acc_next.i.2, %elem.i.3
+  %i_next.i.3 = or disjoint i64 %i.06.i, 4
+  %elem_ptr.i.4 = getelementptr inbounds double, ptr %data_ptr7, i64 %i_next.i.3
+  %elem.i.4 = load double, ptr %elem_ptr.i.4, align 8
+  %acc_next.i.4 = fadd double %acc_next.i.3, %elem.i.4
+  %i_next.i.4 = or disjoint i64 %i.06.i, 5
+  %elem_ptr.i.5 = getelementptr inbounds double, ptr %data_ptr7, i64 %i_next.i.4
+  %elem.i.5 = load double, ptr %elem_ptr.i.5, align 8
+  %acc_next.i.5 = fadd double %acc_next.i.4, %elem.i.5
+  %i_next.i.5 = or disjoint i64 %i.06.i, 6
+  %elem_ptr.i.6 = getelementptr inbounds double, ptr %data_ptr7, i64 %i_next.i.5
+  %elem.i.6 = load double, ptr %elem_ptr.i.6, align 8
+  %acc_next.i.6 = fadd double %acc_next.i.5, %elem.i.6
+  %i_next.i.6 = or disjoint i64 %i.06.i, 7
+  %elem_ptr.i.7 = getelementptr inbounds double, ptr %data_ptr7, i64 %i_next.i.6
+  %elem.i.7 = load double, ptr %elem_ptr.i.7, align 8
+  %acc_next.i.7 = fadd double %acc_next.i.6, %elem.i.7
+  %i_next.i.7 = add nuw i64 %i.06.i, 8
+  %niter.next.7 = add i64 %niter, 8
+  %niter.ncmp.7.not = icmp eq i64 %niter.next.7, %unroll_iter
+  br i1 %niter.ncmp.7.not, label %arr_loop_end.loopexit.i.unr-lcssa, label %arr_loop_body.i
+
+arr_loop_end.loopexit.i.unr-lcssa:                ; preds = %arr_loop_body.i, %arr_loop_body.i.preheader
+  %acc_next.i.lcssa.ph = phi double [ undef, %arr_loop_body.i.preheader ], [ %acc_next.i.7, %arr_loop_body.i ]
+  %i.06.i.unr = phi i64 [ 0, %arr_loop_body.i.preheader ], [ %i_next.i.7, %arr_loop_body.i ]
+  %acc.05.i.unr = phi double [ 0.000000e+00, %arr_loop_body.i.preheader ], [ %acc_next.i.7, %arr_loop_body.i ]
+  %lcmp.mod.not = icmp eq i64 %xtraiter, 0
+  br i1 %lcmp.mod.not, label %arr_loop_end.loopexit.i, label %arr_loop_body.i.epil
+
+arr_loop_body.i.epil:                             ; preds = %arr_loop_end.loopexit.i.unr-lcssa, %arr_loop_body.i.epil
+  %i.06.i.epil = phi i64 [ %i_next.i.epil, %arr_loop_body.i.epil ], [ %i.06.i.unr, %arr_loop_end.loopexit.i.unr-lcssa ]
+  %acc.05.i.epil = phi double [ %acc_next.i.epil, %arr_loop_body.i.epil ], [ %acc.05.i.unr, %arr_loop_end.loopexit.i.unr-lcssa ]
+  %epil.iter = phi i64 [ %epil.iter.next, %arr_loop_body.i.epil ], [ 0, %arr_loop_end.loopexit.i.unr-lcssa ]
+  %elem_ptr.i.epil = getelementptr inbounds double, ptr %data_ptr7, i64 %i.06.i.epil
+  %elem.i.epil = load double, ptr %elem_ptr.i.epil, align 8
+  %acc_next.i.epil = fadd double %acc.05.i.epil, %elem.i.epil
+  %i_next.i.epil = add nuw i64 %i.06.i.epil, 1
+  %epil.iter.next = add i64 %epil.iter, 1
+  %epil.iter.cmp.not = icmp eq i64 %epil.iter.next, %xtraiter
+  br i1 %epil.iter.cmp.not, label %arr_loop_end.loopexit.i, label %arr_loop_body.i.epil, !llvm.loop !6
+
+arr_loop_end.loopexit.i:                          ; preds = %arr_loop_body.i.epil, %arr_loop_end.loopexit.i.unr-lcssa
+  %acc_next.i.lcssa = phi double [ %acc_next.i.lcssa.ph, %arr_loop_end.loopexit.i.unr-lcssa ], [ %acc_next.i.epil, %arr_loop_body.i.epil ]
+  %20 = bitcast double %acc_next.i.lcssa to i64
+  br label %total.exit
+
+total.exit:                                       ; preds = %print_end, %arr_loop_end.loopexit.i
+  %acc.0.lcssa.i = phi i64 [ 0, %print_end ], [ %20, %arr_loop_end.loopexit.i ]
+  %check_qnan30 = and i64 %acc.0.lcssa.i, 9221120237041090560
+  %is_float31.not = icmp eq i64 %check_qnan30, 9221120237041090560
+  %tag_bits32 = lshr i64 %acc.0.lcssa.i, 48
+  %tag33 = and i64 %tag_bits32, 7
+  %is_bool34 = icmp eq i64 %tag33, 1
+  %is_string35 = icmp eq i64 %tag33, 2
+  %is_list36 = icmp eq i64 %tag33, 3
+  %21 = trunc i64 %tag_bits32 to i3
+  %22 = select i1 %is_bool34, i3 2, i3 %21
+  %23 = select i1 %is_string35, i3 3, i3 %22
+  %24 = select i1 %is_list36, i3 -4, i3 %23
+  %i64_to_f6443 = bitcast i64 %acc.0.lcssa.i to double
+  %extract_payload44 = and i64 %acc.0.lcssa.i, 281474976710655
+  %is_negative46.not = icmp ult i64 %extract_payload44, 140737488355328
+  %masksel67 = select i1 %is_negative46.not, i64 0, i64 -281474976710656
+  %signed_payload48 = or disjoint i64 %masksel67, %extract_payload44
+  %payload_to_f6449 = sitofp i64 %signed_payload48 to double
+  %final_payload50 = select i1 %is_float31.not, double %payload_to_f6449, double %i64_to_f6443
+  %trunc68 = select i1 %is_float31.not, i3 %24, i3 1
+  switch i3 %trunc68, label %print_float55 [
+    i3 3, label %print_string56
+    i3 0, label %print_int54
+  ]
+
+print_int54:                                      ; preds = %total.exit
+  %to_int58 = fptosi double %final_payload50 to i64
+  %printf_int59 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int58)
+  br label %print_end57
+
+print_float55:                                    ; preds = %total.exit
+  %printf_float60 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_string.2, double %final_payload50)
+  br label %print_end57
+
+print_string56:                                   ; preds = %total.exit
+  %payload_to_ptr62 = inttoptr i64 %extract_payload44 to ptr
+  %puts69 = tail call i32 @puts(ptr nonnull dereferenceable(1) %payload_to_ptr62)
+  br label %print_end57
+
+print_end57:                                      ; preds = %print_string56, %print_float55, %print_int54
+  ret i32 0
+}
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @printf(ptr nocapture noundef readonly, ...) local_unnamed_addr #3
+
+; Function Attrs: nofree nounwind
+declare noundef i32 @puts(ptr nocapture noundef readonly) local_unnamed_addr #3
+
+attributes #0 = { nofree nounwind memory(readwrite, argmem: read) }
+attributes #1 = { nofree norecurse nosync nounwind memory(read, inaccessiblemem: none) }
+attributes #2 = { mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite) "alloc-family"="malloc" }
+attributes #3 = { nofree nounwind }
+
+!0 = distinct !{!0, !1}
+!1 = !{!"llvm.loop.unroll.disable"}
+!2 = distinct !{!2, !3, !4}
+!3 = !{!"llvm.loop.isvectorized", i32 1}
+!4 = !{!"llvm.loop.unroll.runtime.disable"}
+!5 = distinct !{!5, !3}
+!6 = distinct !{!6, !1}

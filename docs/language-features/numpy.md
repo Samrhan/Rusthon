@@ -96,6 +96,28 @@ a = np.array([1.0, 2.0, 3.0])
 print(a)         # [1.000000 2.000000 3.000000]
 ```
 
+## Arrays through functions
+
+Arrays can be passed to and returned from user-defined functions, including
+transitively and through recursion. The compiler figures out which parameters
+and return values are arrays with a whole-program analysis, so no annotations
+are needed.
+
+```python
+import numpy as np
+
+def scale(v, k):
+    return v * k          # element-wise, v is an array parameter
+
+def normalize(v):
+    return v / v.sum()    # returns an array
+
+a = np.array([1.0, 2.0, 3.0, 4.0])
+b = scale(a, 2.0)         # b is an array
+print(b.sum())            # 20.0
+print(normalize(a))       # [0.100000 0.200000 0.300000 0.400000]
+```
+
 ## Constants
 
 ```python
@@ -113,10 +135,6 @@ The subset keeps growing. Not yet supported:
 - **Slice assignment** (`a[1:3] = ...`), fancy/boolean indexing, negative
   indices, and slice steps. Single-element item assignment and copy-slicing
   *are* supported.
-- **Arrays across user-defined function boundaries** — arrays are not tracked
-  through function parameters or return values yet, so passing an array into a
-  user `def` (or returning one) is not supported. NumPy calls, operators,
-  indexing, slicing and reductions on locals all work.
 - Most of the wider NumPy API (`reshape`, `dot`/`@`, ufuncs like `np.sqrt`, …).
 
 See [Limitations](/limitations) for the full list and the
