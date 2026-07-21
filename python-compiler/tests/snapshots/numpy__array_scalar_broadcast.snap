@@ -10,61 +10,75 @@ source_filename = "main"
 ; Function Attrs: nofree nounwind
 define noundef i32 @main() local_unnamed_addr #0 {
 entry:
-  %malloc_arr = tail call dereferenceable_or_null(64) ptr @malloc(i64 64)
+  %malloc_arr = tail call dereferenceable_or_null(80) ptr @malloc(i64 80)
   store i64 1, ptr %malloc_arr, align 4
-  %hdr_ptr1 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
-  store i64 1, ptr %hdr_ptr1, align 4
-  %hdr_ptr2 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
-  store i64 5, ptr %hdr_ptr2, align 4
-  %data_ptr = getelementptr inbounds i64, ptr %malloc_arr, i64 3
+  %hdr_ptr1 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
+  store i64 5, ptr %hdr_ptr1, align 4
+  %hdr_ptr2 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
+  store i64 1, ptr %hdr_ptr2, align 4
+  %hdr_ptr3 = getelementptr inbounds i64, ptr %malloc_arr, i64 3
+  store i64 5, ptr %hdr_ptr3, align 4
+  %hdr_ptr4 = getelementptr inbounds i64, ptr %malloc_arr, i64 4
+  store i64 1, ptr %hdr_ptr4, align 4
+  %data_ptr = getelementptr inbounds i64, ptr %malloc_arr, i64 5
   store i64 0, ptr %data_ptr, align 4
-  %elem_ptr.1 = getelementptr inbounds i64, ptr %malloc_arr, i64 4
+  %elem_ptr.1 = getelementptr inbounds i64, ptr %malloc_arr, i64 6
   store i64 1, ptr %elem_ptr.1, align 4
-  %elem_ptr.2 = getelementptr inbounds i64, ptr %malloc_arr, i64 5
+  %elem_ptr.2 = getelementptr inbounds i64, ptr %malloc_arr, i64 7
   store i64 2, ptr %elem_ptr.2, align 4
-  %elem_ptr.3 = getelementptr inbounds i64, ptr %malloc_arr, i64 6
+  %elem_ptr.3 = getelementptr inbounds i64, ptr %malloc_arr, i64 8
   store i64 3, ptr %elem_ptr.3, align 4
-  %elem_ptr.4 = getelementptr inbounds i64, ptr %malloc_arr, i64 7
+  %elem_ptr.4 = getelementptr inbounds i64, ptr %malloc_arr, i64 9
   store i64 4, ptr %elem_ptr.4, align 4
   %arr_ptr_to_int = ptrtoint ptr %malloc_arr to i64
   %arr_ptr_payload = and i64 %arr_ptr_to_int, 281474976710655
   %payload_to_arr_ptr = inttoptr i64 %arr_ptr_payload to ptr
   %size_ptr = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 2
   %arr_size = load i64, ptr %size_ptr, align 4
-  %data_ptr5 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
+  %data_ptr7 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 5
+  %hdr_ptr13 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 1
+  %hdr_val = load i64, ptr %hdr_ptr13, align 4
+  %hdr_ptr14 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
+  %hdr_val15 = load i64, ptr %hdr_ptr14, align 4
+  %hdr_ptr16 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 4
+  %hdr_val17 = load i64, ptr %hdr_ptr16, align 4
   %arr_words = shl i64 %arr_size, 3
-  %arr_bytes = add i64 %arr_words, 24
-  %malloc_arr9 = tail call ptr @malloc(i64 %arr_bytes)
-  store i64 1, ptr %malloc_arr9, align 4
-  %hdr_ptr11 = getelementptr inbounds i64, ptr %malloc_arr9, i64 1
-  store i64 1, ptr %hdr_ptr11, align 4
-  %hdr_ptr12 = getelementptr inbounds i64, ptr %malloc_arr9, i64 2
-  store i64 %arr_size, ptr %hdr_ptr12, align 4
-  %data_ptr13 = getelementptr inbounds i64, ptr %malloc_arr9, i64 3
-  %loop_cont19136.not = icmp eq i64 %arr_size, 0
-  br i1 %loop_cont19136.not, label %arr_loop_end17, label %arr_loop_body16.preheader
+  %arr_bytes = add i64 %arr_words, 40
+  %malloc_arr18 = tail call ptr @malloc(i64 %arr_bytes)
+  store i64 1, ptr %malloc_arr18, align 4
+  %hdr_ptr20 = getelementptr inbounds i64, ptr %malloc_arr18, i64 2
+  store i64 %arr_size, ptr %hdr_ptr20, align 4
+  %hdr_ptr21 = getelementptr inbounds i64, ptr %malloc_arr18, i64 1
+  store i64 %hdr_val, ptr %hdr_ptr21, align 4
+  %hdr_ptr22 = getelementptr inbounds i64, ptr %malloc_arr18, i64 3
+  store i64 %hdr_val15, ptr %hdr_ptr22, align 4
+  %hdr_ptr23 = getelementptr inbounds i64, ptr %malloc_arr18, i64 4
+  store i64 %hdr_val17, ptr %hdr_ptr23, align 4
+  %data_ptr24 = getelementptr inbounds i64, ptr %malloc_arr18, i64 5
+  %loop_cont30157.not = icmp eq i64 %arr_size, 0
+  br i1 %loop_cont30157.not, label %arr_loop_end28, label %arr_loop_body27.preheader
 
-arr_loop_body16.preheader:                        ; preds = %entry
-  %malloc_arr9140 = ptrtoint ptr %malloc_arr9 to i64
+arr_loop_body27.preheader:                        ; preds = %entry
+  %malloc_arr18161 = ptrtoint ptr %malloc_arr18 to i64
   %min.iters.check = icmp ult i64 %arr_size, 4
-  %0 = sub i64 %malloc_arr9140, %arr_ptr_payload
+  %0 = sub i64 %malloc_arr18161, %arr_ptr_payload
   %diff.check = icmp ult i64 %0, 32
   %or.cond = or i1 %min.iters.check, %diff.check
-  br i1 %or.cond, label %arr_loop_body16.preheader160, label %vector.ph
+  br i1 %or.cond, label %arr_loop_body27.preheader181, label %vector.ph
 
-vector.ph:                                        ; preds = %arr_loop_body16.preheader
+vector.ph:                                        ; preds = %arr_loop_body27.preheader
   %n.vec = and i64 %arr_size, -4
   br label %vector.body
 
 vector.body:                                      ; preds = %vector.body, %vector.ph
   %index = phi i64 [ 0, %vector.ph ], [ %index.next, %vector.body ]
-  %1 = getelementptr inbounds i64, ptr %data_ptr5, i64 %index
+  %1 = getelementptr inbounds i64, ptr %data_ptr7, i64 %index
   %2 = getelementptr inbounds i64, ptr %1, i64 2
   %wide.load = load <2 x i64>, ptr %1, align 4
-  %wide.load141 = load <2 x i64>, ptr %2, align 4
+  %wide.load162 = load <2 x i64>, ptr %2, align 4
   %3 = shl <2 x i64> %wide.load, <i64 1, i64 1>
-  %4 = shl <2 x i64> %wide.load141, <i64 1, i64 1>
-  %5 = getelementptr inbounds i64, ptr %data_ptr13, i64 %index
+  %4 = shl <2 x i64> %wide.load162, <i64 1, i64 1>
+  %5 = getelementptr inbounds i64, ptr %data_ptr24, i64 %index
   %6 = getelementptr inbounds i64, ptr %5, i64 2
   store <2 x i64> %3, ptr %5, align 4
   store <2 x i64> %4, ptr %6, align 4
@@ -74,105 +88,109 @@ vector.body:                                      ; preds = %vector.body, %vecto
 
 middle.block:                                     ; preds = %vector.body
   %cmp.n = icmp eq i64 %arr_size, %n.vec
-  br i1 %cmp.n, label %arr_loop_end17, label %arr_loop_body16.preheader160
+  br i1 %cmp.n, label %arr_loop_end28, label %arr_loop_body27.preheader181
 
-arr_loop_body16.preheader160:                     ; preds = %arr_loop_body16.preheader, %middle.block
-  %storemerge137.ph = phi i64 [ 0, %arr_loop_body16.preheader ], [ %n.vec, %middle.block ]
-  br label %arr_loop_body16
+arr_loop_body27.preheader181:                     ; preds = %arr_loop_body27.preheader, %middle.block
+  %storemerge158.ph = phi i64 [ 0, %arr_loop_body27.preheader ], [ %n.vec, %middle.block ]
+  br label %arr_loop_body27
 
-arr_loop_body16:                                  ; preds = %arr_loop_body16.preheader160, %arr_loop_body16
-  %storemerge137 = phi i64 [ %i_next23, %arr_loop_body16 ], [ %storemerge137.ph, %arr_loop_body16.preheader160 ]
-  %elem_ptr21 = getelementptr inbounds i64, ptr %data_ptr5, i64 %storemerge137
-  %elem_i = load i64, ptr %elem_ptr21, align 4
+arr_loop_body27:                                  ; preds = %arr_loop_body27.preheader181, %arr_loop_body27
+  %storemerge158 = phi i64 [ %i_next34, %arr_loop_body27 ], [ %storemerge158.ph, %arr_loop_body27.preheader181 ]
+  %elem_ptr32 = getelementptr inbounds i64, ptr %data_ptr7, i64 %storemerge158
+  %elem_i = load i64, ptr %elem_ptr32, align 4
   %arr_imul = shl i64 %elem_i, 1
-  %elem_ptr22 = getelementptr inbounds i64, ptr %data_ptr13, i64 %storemerge137
-  store i64 %arr_imul, ptr %elem_ptr22, align 4
-  %i_next23 = add nuw i64 %storemerge137, 1
-  %loop_cont19 = icmp ult i64 %i_next23, %arr_size
-  br i1 %loop_cont19, label %arr_loop_body16, label %arr_loop_end17, !llvm.loop !3
+  %elem_ptr33 = getelementptr inbounds i64, ptr %data_ptr24, i64 %storemerge158
+  store i64 %arr_imul, ptr %elem_ptr33, align 4
+  %i_next34 = add nuw i64 %storemerge158, 1
+  %loop_cont30 = icmp ult i64 %i_next34, %arr_size
+  br i1 %loop_cont30, label %arr_loop_body27, label %arr_loop_end28, !llvm.loop !3
 
-arr_loop_end17:                                   ; preds = %arr_loop_body16, %middle.block, %entry
-  %malloc_arr50 = tail call ptr @malloc(i64 %arr_bytes)
-  store i64 1, ptr %malloc_arr50, align 4
-  %hdr_ptr52 = getelementptr inbounds i64, ptr %malloc_arr50, i64 1
-  store i64 1, ptr %hdr_ptr52, align 4
-  %hdr_ptr53 = getelementptr inbounds i64, ptr %malloc_arr50, i64 2
-  store i64 %arr_size, ptr %hdr_ptr53, align 4
-  %data_ptr54 = getelementptr inbounds i64, ptr %malloc_arr50, i64 3
-  br i1 %loop_cont19136.not, label %arr_loop_end58, label %arr_loop_body57.preheader
+arr_loop_end28:                                   ; preds = %arr_loop_body27, %middle.block, %entry
+  %malloc_arr69 = tail call ptr @malloc(i64 %arr_bytes)
+  store i64 1, ptr %malloc_arr69, align 4
+  %hdr_ptr71 = getelementptr inbounds i64, ptr %malloc_arr69, i64 2
+  store i64 %arr_size, ptr %hdr_ptr71, align 4
+  %hdr_ptr72 = getelementptr inbounds i64, ptr %malloc_arr69, i64 1
+  store i64 %hdr_val, ptr %hdr_ptr72, align 4
+  %hdr_ptr73 = getelementptr inbounds i64, ptr %malloc_arr69, i64 3
+  store i64 %hdr_val15, ptr %hdr_ptr73, align 4
+  %hdr_ptr74 = getelementptr inbounds i64, ptr %malloc_arr69, i64 4
+  store i64 %hdr_val17, ptr %hdr_ptr74, align 4
+  %data_ptr75 = getelementptr inbounds i64, ptr %malloc_arr69, i64 5
+  br i1 %loop_cont30157.not, label %arr_loop_end79, label %arr_loop_body78.preheader
 
-arr_loop_body57.preheader:                        ; preds = %arr_loop_end17
-  %malloc_arr50143 = ptrtoint ptr %malloc_arr50 to i64
-  %min.iters.check147 = icmp ult i64 %arr_size, 4
-  %8 = sub i64 %malloc_arr50143, %arr_ptr_payload
-  %diff.check144 = icmp ult i64 %8, 32
-  %or.cond158 = or i1 %min.iters.check147, %diff.check144
-  br i1 %or.cond158, label %arr_loop_body57.preheader159, label %vector.ph148
+arr_loop_body78.preheader:                        ; preds = %arr_loop_end28
+  %malloc_arr69164 = ptrtoint ptr %malloc_arr69 to i64
+  %min.iters.check168 = icmp ult i64 %arr_size, 4
+  %8 = sub i64 %malloc_arr69164, %arr_ptr_payload
+  %diff.check165 = icmp ult i64 %8, 32
+  %or.cond179 = or i1 %min.iters.check168, %diff.check165
+  br i1 %or.cond179, label %arr_loop_body78.preheader180, label %vector.ph169
 
-vector.ph148:                                     ; preds = %arr_loop_body57.preheader
-  %n.vec150 = and i64 %arr_size, -4
-  br label %vector.body153
+vector.ph169:                                     ; preds = %arr_loop_body78.preheader
+  %n.vec171 = and i64 %arr_size, -4
+  br label %vector.body174
 
-vector.body153:                                   ; preds = %vector.body153, %vector.ph148
-  %index154 = phi i64 [ 0, %vector.ph148 ], [ %index.next157, %vector.body153 ]
-  %9 = getelementptr inbounds i64, ptr %data_ptr5, i64 %index154
+vector.body174:                                   ; preds = %vector.body174, %vector.ph169
+  %index175 = phi i64 [ 0, %vector.ph169 ], [ %index.next178, %vector.body174 ]
+  %9 = getelementptr inbounds i64, ptr %data_ptr7, i64 %index175
   %10 = getelementptr inbounds i64, ptr %9, i64 2
-  %wide.load155 = load <2 x i64>, ptr %9, align 4
-  %wide.load156 = load <2 x i64>, ptr %10, align 4
-  %11 = add <2 x i64> %wide.load155, <i64 10, i64 10>
-  %12 = add <2 x i64> %wide.load156, <i64 10, i64 10>
-  %13 = getelementptr inbounds i64, ptr %data_ptr54, i64 %index154
+  %wide.load176 = load <2 x i64>, ptr %9, align 4
+  %wide.load177 = load <2 x i64>, ptr %10, align 4
+  %11 = add <2 x i64> %wide.load176, <i64 10, i64 10>
+  %12 = add <2 x i64> %wide.load177, <i64 10, i64 10>
+  %13 = getelementptr inbounds i64, ptr %data_ptr75, i64 %index175
   %14 = getelementptr inbounds i64, ptr %13, i64 2
   store <2 x i64> %11, ptr %13, align 4
   store <2 x i64> %12, ptr %14, align 4
-  %index.next157 = add nuw i64 %index154, 4
-  %15 = icmp eq i64 %index.next157, %n.vec150
-  br i1 %15, label %middle.block145, label %vector.body153, !llvm.loop !4
+  %index.next178 = add nuw i64 %index175, 4
+  %15 = icmp eq i64 %index.next178, %n.vec171
+  br i1 %15, label %middle.block166, label %vector.body174, !llvm.loop !4
 
-middle.block145:                                  ; preds = %vector.body153
-  %cmp.n152 = icmp eq i64 %arr_size, %n.vec150
-  br i1 %cmp.n152, label %arr_loop_end58, label %arr_loop_body57.preheader159
+middle.block166:                                  ; preds = %vector.body174
+  %cmp.n173 = icmp eq i64 %arr_size, %n.vec171
+  br i1 %cmp.n173, label %arr_loop_end79, label %arr_loop_body78.preheader180
 
-arr_loop_body57.preheader159:                     ; preds = %arr_loop_body57.preheader, %middle.block145
-  %storemerge133139.ph = phi i64 [ 0, %arr_loop_body57.preheader ], [ %n.vec150, %middle.block145 ]
-  br label %arr_loop_body57
+arr_loop_body78.preheader180:                     ; preds = %arr_loop_body78.preheader, %middle.block166
+  %storemerge154160.ph = phi i64 [ 0, %arr_loop_body78.preheader ], [ %n.vec171, %middle.block166 ]
+  br label %arr_loop_body78
 
-arr_loop_body57:                                  ; preds = %arr_loop_body57.preheader159, %arr_loop_body57
-  %storemerge133139 = phi i64 [ %i_next65, %arr_loop_body57 ], [ %storemerge133139.ph, %arr_loop_body57.preheader159 ]
-  %elem_ptr62 = getelementptr inbounds i64, ptr %data_ptr5, i64 %storemerge133139
-  %elem_i63 = load i64, ptr %elem_ptr62, align 4
-  %arr_iadd = add i64 %elem_i63, 10
-  %elem_ptr64 = getelementptr inbounds i64, ptr %data_ptr54, i64 %storemerge133139
-  store i64 %arr_iadd, ptr %elem_ptr64, align 4
-  %i_next65 = add nuw i64 %storemerge133139, 1
-  %loop_cont60 = icmp ult i64 %i_next65, %arr_size
-  br i1 %loop_cont60, label %arr_loop_body57, label %arr_loop_end58, !llvm.loop !5
+arr_loop_body78:                                  ; preds = %arr_loop_body78.preheader180, %arr_loop_body78
+  %storemerge154160 = phi i64 [ %i_next86, %arr_loop_body78 ], [ %storemerge154160.ph, %arr_loop_body78.preheader180 ]
+  %elem_ptr83 = getelementptr inbounds i64, ptr %data_ptr7, i64 %storemerge154160
+  %elem_i84 = load i64, ptr %elem_ptr83, align 4
+  %arr_iadd = add i64 %elem_i84, 10
+  %elem_ptr85 = getelementptr inbounds i64, ptr %data_ptr75, i64 %storemerge154160
+  store i64 %arr_iadd, ptr %elem_ptr85, align 4
+  %i_next86 = add nuw i64 %storemerge154160, 1
+  %loop_cont81 = icmp ult i64 %i_next86, %arr_size
+  br i1 %loop_cont81, label %arr_loop_body78, label %arr_loop_end79, !llvm.loop !5
 
-arr_loop_end58:                                   ; preds = %arr_loop_body57, %middle.block145, %arr_loop_end17
-  %arr_ptr_to_int24 = ptrtoint ptr %malloc_arr9 to i64
-  %arr_ptr_payload25 = and i64 %arr_ptr_to_int24, 281474976710655
-  %arr_ptr_to_int66 = ptrtoint ptr %malloc_arr50 to i64
-  %arr_ptr_payload67 = and i64 %arr_ptr_to_int66, 281474976710655
-  %payload_to_arr_ptr71 = inttoptr i64 %arr_ptr_payload25 to ptr
-  %elem_ptr73 = getelementptr inbounds i64, ptr %payload_to_arr_ptr71, i64 7
-  %elem_i74 = load i64, ptr %elem_ptr73, align 4
-  %int_payload75 = and i64 %elem_i74, 281474976710655
-  %is_negative83.not = icmp ult i64 %int_payload75, 140737488355328
-  %masksel = select i1 %is_negative83.not, i64 0, i64 -281474976710656
-  %signed_payload85 = or disjoint i64 %masksel, %int_payload75
-  %payload_to_f6486 = sitofp i64 %signed_payload85 to double
-  %to_int = fptosi double %payload_to_f6486 to i64
+arr_loop_end79:                                   ; preds = %arr_loop_body78, %middle.block166, %arr_loop_end28
+  %arr_ptr_to_int35 = ptrtoint ptr %malloc_arr18 to i64
+  %arr_ptr_payload36 = and i64 %arr_ptr_to_int35, 281474976710655
+  %arr_ptr_to_int87 = ptrtoint ptr %malloc_arr69 to i64
+  %arr_ptr_payload88 = and i64 %arr_ptr_to_int87, 281474976710655
+  %payload_to_arr_ptr92 = inttoptr i64 %arr_ptr_payload36 to ptr
+  %elem_ptr94 = getelementptr inbounds i64, ptr %payload_to_arr_ptr92, i64 9
+  %elem_i95 = load i64, ptr %elem_ptr94, align 4
+  %int_payload96 = and i64 %elem_i95, 281474976710655
+  %is_negative104.not = icmp ult i64 %int_payload96, 140737488355328
+  %masksel = select i1 %is_negative104.not, i64 0, i64 -281474976710656
+  %signed_payload106 = or disjoint i64 %masksel, %int_payload96
+  %payload_to_f64107 = sitofp i64 %signed_payload106 to double
+  %to_int = fptosi double %payload_to_f64107 to i64
   %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int)
-  %payload_to_arr_ptr91 = inttoptr i64 %arr_ptr_payload67 to ptr
-  %data_ptr92 = getelementptr inbounds i64, ptr %payload_to_arr_ptr91, i64 3
-  %elem_i94 = load i64, ptr %data_ptr92, align 4
-  %int_payload95 = and i64 %elem_i94, 281474976710655
-  %is_negative113.not = icmp ult i64 %int_payload95, 140737488355328
-  %masksel134 = select i1 %is_negative113.not, i64 0, i64 -281474976710656
-  %signed_payload115 = or disjoint i64 %masksel134, %int_payload95
-  %payload_to_f64116 = sitofp i64 %signed_payload115 to double
-  %to_int125 = fptosi double %payload_to_f64116 to i64
-  %printf_int126 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int125)
+  %payload_to_arr_ptr112 = inttoptr i64 %arr_ptr_payload88 to ptr
+  %data_ptr113 = getelementptr inbounds i64, ptr %payload_to_arr_ptr112, i64 5
+  %elem_i115 = load i64, ptr %data_ptr113, align 4
+  %int_payload116 = and i64 %elem_i115, 281474976710655
+  %is_negative134.not = icmp ult i64 %int_payload116, 140737488355328
+  %masksel155 = select i1 %is_negative134.not, i64 0, i64 -281474976710656
+  %signed_payload136 = or disjoint i64 %masksel155, %int_payload116
+  %payload_to_f64137 = sitofp i64 %signed_payload136 to double
+  %to_int146 = fptosi double %payload_to_f64137 to i64
+  %printf_int147 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.1, i64 %to_int146)
   ret i32 0
 }
 

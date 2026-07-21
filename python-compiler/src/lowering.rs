@@ -403,6 +403,11 @@ fn lower_expression(expr: &ast::Expr, ctx: &LoweringContext) -> Result<IRExpr, L
                         upper,
                     })
                 }
+                // `a[i, j]` — the subscript is a tuple of indices.
+                ast::Expr::Tuple(ast::ExprTuple { elts, .. }) => Ok(IRExpr::IndexND {
+                    array: Box::new(base),
+                    indices: lower_expressions(elts, ctx)?,
+                }),
                 _ => {
                     let index = lower_expression(slice, ctx)?;
                     Ok(IRExpr::Index {

@@ -10,23 +10,24 @@
 //! ## Memory layout
 //!
 //! ```text
-//! base ─▶ [ dtype ][ ndim ][ size ][ x0 ][ x1 ] ... [ x(size-1) ]
-//!          i64      i64      i64     └────── size elements ──────┘
-//!         └──────── header (3 words) ─────┘
+//! base ─▶ [ dtype ][ ndim ][ size ][ rows ][ cols ][ x0 ] ... [ x(size-1) ]
+//!          i64      i64      i64     i64      i64     └──── size elements ───┘
+//!         └───────────────── header (5 words) ─────────────┘
 //! ```
 //!
-//! - `dtype`: element type tag (currently always [`DTYPE_F64`]).
-//! - `ndim` : number of dimensions (currently always 1).
+//! - `dtype`: element type tag ([`DTYPE_F64`] or [`DTYPE_I64`]).
+//! - `ndim` : number of dimensions (1 or 2).
 //! - `size` : total number of elements.
-//! - data   : `size` contiguous elements. For `float64` each is an `f64`; the
-//!   slot is 8 bytes so header words and data elements share one allocation and
-//!   one addressing scheme (index `i` lives at word `HEADER_WORDS + i`).
+//! - `rows`/`cols`: dimension 0/1. A 1-D array has `rows = size`, `cols = 1`;
+//!   a 2-D array is stored row-major with `size = rows * cols`.
+//! - data   : `size` contiguous elements. Each slot is 8 bytes (`f64` or `i64`),
+//!   so header words and data share one allocation and one addressing scheme
+//!   (element `i` lives at word `HEADER_WORDS + i`).
 //!
-//! The `dtype`/`ndim` header fields are carried now (even though only
-//! `float64`/1-D are generated) so multi-dtype and multi-dimensional arrays can
-//! be added without changing the layout of existing code.
+//! The header is a fixed 5 words so the data offset stays a compile-time
+//! constant. Higher `ndim` would need a variable-length shape and is future work.
 
-use crate::ast::BinOp;
+use crate::ast::{BinOp, IRExpr};
 use crate::codegen::{CodeGenError, Compiler};
 use crate::compiler::arrayness::ArrayDtype;
 use inkwell::intrinsics::Intrinsic;
@@ -37,10 +38,21 @@ pub const DTYPE_F64: i64 = 0;
 /// Element dtype tag for `int64` arrays.
 pub const DTYPE_I64: i64 = 1;
 
+// The array header is a fixed 5 `i64` words: `[dtype, ndim, size, rows, cols]`,
+// followed by `size` contiguous elements (row-major). A 1-D array has
+// `ndim = 1`, `rows = size`, `cols = 1`; a 2-D array `ndim = 2`,
+// `size = rows * cols`. A fixed header keeps the data offset a compile-time
+// constant (no runtime `ndim` read on every element access).
 /// Number of `i64`-sized header words preceding the data buffer.
-const HEADER_WORDS: u64 = 3;
-/// Word offset of the `size` field within the header.
+const HEADER_WORDS: u64 = 5;
+/// Word offset of the `ndim` field within the header.
+const NDIM_WORD: u64 = 1;
+/// Word offset of the `size` (total element count) field.
 const SIZE_WORD: u64 = 2;
+/// Word offset of the `rows` (dimension 0) field.
+const ROWS_WORD: u64 = 3;
+/// Word offset of the `cols` (dimension 1) field.
+const COLS_WORD: u64 = 4;
 
 /// The header dtype tag for an [`ArrayDtype`]. `Unknown` should be rejected by
 /// callers before reaching codegen; it is treated as float defensively.
@@ -51,20 +63,19 @@ fn dtype_tag(dtype: ArrayDtype) -> i64 {
     }
 }
 
-/// Allocates an uninitialised array with `len` elements of the given dtype and
-/// writes its header. Returns the base pointer (data is left uninitialised).
-fn alloc_array<'ctx>(
+/// Allocates an uninitialised `size`-element buffer, writing the `dtype` and
+/// `size` header words. The caller (`alloc_array`/`alloc_array_2d`/`alloc_like`)
+/// fills in `ndim`/`rows`/`cols`. Data is left uninitialised.
+fn alloc_raw<'ctx>(
     compiler: &mut Compiler<'ctx>,
-    len: IntValue<'ctx>,
+    size: IntValue<'ctx>,
     dtype: i64,
 ) -> Result<PointerValue<'ctx>, CodeGenError> {
     let i64_type = compiler.context.i64_type();
-
-    // total_words = HEADER_WORDS + len ; total_bytes = total_words * 8
     let header = i64_type.const_int(HEADER_WORDS, false);
     let total_words = compiler
         .builder
-        .build_int_add(header, len, "arr_words")
+        .build_int_add(header, size, "arr_words")
         .unwrap();
     let word_size = i64_type.const_int(8, false);
     let total_bytes = compiler
@@ -86,13 +97,86 @@ fn alloc_array<'ctx>(
             ))
         }
     };
-
-    // Write header: [dtype][ndim=1][size=len]
     store_word(compiler, base, 0, i64_type.const_int(dtype as u64, true));
-    store_word(compiler, base, 1, i64_type.const_int(1, false));
-    store_word(compiler, base, SIZE_WORD, len);
-
+    store_word(compiler, base, SIZE_WORD, size);
     Ok(base)
+}
+
+/// Allocates a 1-D array of `len` elements (`ndim = 1`, `rows = len`, `cols = 1`).
+fn alloc_array<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    len: IntValue<'ctx>,
+    dtype: i64,
+) -> Result<PointerValue<'ctx>, CodeGenError> {
+    let base = alloc_raw(compiler, len, dtype)?;
+    let one = compiler.context.i64_type().const_int(1, false);
+    store_word(compiler, base, NDIM_WORD, one);
+    store_word(compiler, base, ROWS_WORD, len);
+    store_word(compiler, base, COLS_WORD, one);
+    Ok(base)
+}
+
+/// Allocates a 2-D array of `rows * cols` elements (`ndim = 2`).
+fn alloc_array_2d<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    rows: IntValue<'ctx>,
+    cols: IntValue<'ctx>,
+    dtype: i64,
+) -> Result<PointerValue<'ctx>, CodeGenError> {
+    let size = compiler
+        .builder
+        .build_int_mul(rows, cols, "arr_2d_size")
+        .unwrap();
+    let base = alloc_raw(compiler, size, dtype)?;
+    let two = compiler.context.i64_type().const_int(2, false);
+    store_word(compiler, base, NDIM_WORD, two);
+    store_word(compiler, base, ROWS_WORD, rows);
+    store_word(compiler, base, COLS_WORD, cols);
+    Ok(base)
+}
+
+/// Allocates a new array with the **same shape** (`ndim`/`rows`/`cols`/`size`)
+/// as `template` but the given dtype. Used by element-wise ops so a 2-D input
+/// yields a 2-D result.
+fn alloc_like<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    template: PointerValue<'ctx>,
+    dtype: i64,
+) -> Result<PointerValue<'ctx>, CodeGenError> {
+    let size = array_len(compiler, template);
+    let ndim = header_word(compiler, template, NDIM_WORD);
+    let rows = header_word(compiler, template, ROWS_WORD);
+    let cols = header_word(compiler, template, COLS_WORD);
+    let base = alloc_raw(compiler, size, dtype)?;
+    store_word(compiler, base, NDIM_WORD, ndim);
+    store_word(compiler, base, ROWS_WORD, rows);
+    store_word(compiler, base, COLS_WORD, cols);
+    Ok(base)
+}
+
+/// Loads a header word (`ndim`/`rows`/`cols`) from an array.
+fn header_word<'ctx>(
+    compiler: &Compiler<'ctx>,
+    base: PointerValue<'ctx>,
+    word: u64,
+) -> IntValue<'ctx> {
+    let i64_type = compiler.context.i64_type();
+    let ptr = unsafe {
+        compiler
+            .builder
+            .build_in_bounds_gep(
+                i64_type,
+                base,
+                &[i64_type.const_int(word, false)],
+                "hdr_ptr",
+            )
+            .unwrap()
+    };
+    compiler
+        .builder
+        .build_load(i64_type, ptr, "hdr_val")
+        .unwrap()
+        .into_int_value()
 }
 
 /// Stores an `i64` at header `word` of the array.
@@ -484,16 +568,17 @@ pub fn binop<'ctx>(
     let lhs_base = lhs_dtype.map(|dt| (compiler.extract_array_ptr(lhs_obj), dt));
     let rhs_base = rhs_dtype.map(|dt| (compiler.extract_array_ptr(rhs_obj), dt));
 
-    // The result length is that of whichever operand is an array (equal when
+    // Shape/length come from whichever operand is an array (equal shape when
     // both are). At least one is an array, so this is compile-time decidable.
-    let length = match (lhs_base, rhs_base) {
-        (Some((base, _)), _) | (_, Some((base, _))) => array_len(compiler, base),
+    let template = match (lhs_base, rhs_base) {
+        (Some((base, _)), _) | (_, Some((base, _))) => base,
         (None, None) => {
             return Err(CodeGenError::ModuleVerification(
                 "array binop with no array operand".to_string(),
             ))
         }
     };
+    let length = array_len(compiler, template);
 
     let lhs = Operand {
         array: lhs_base.map(|(base, dt)| (data_ptr(compiler, base), dt)),
@@ -506,7 +591,7 @@ pub fn binop<'ctx>(
         scalar_i64: compiler.extract_int(rhs_obj),
     };
 
-    let result_base = alloc_array(compiler, length, dtype_tag(result))?;
+    let result_base = alloc_like(compiler, template, dtype_tag(result))?;
     let result_data = data_ptr(compiler, result_base);
 
     let op = op.clone();
@@ -902,20 +987,17 @@ fn clamp<'ctx>(
         .into_int_value()
 }
 
-/// Prints an array as `[e0 e1 ... en]`, formatting each element per the array
-/// dtype (`%d` for int, `%f` for float), followed by a newline when set.
-pub fn print_array<'ctx>(
+/// Prints `[data[start] data[start+1] ... data[start+count-1]]`, one bracketed
+/// row, elements formatted per dtype and separated by a single space.
+fn print_flat_row<'ctx>(
     compiler: &mut Compiler<'ctx>,
-    arr_obj: IntValue<'ctx>,
+    data: PointerValue<'ctx>,
+    start: IntValue<'ctx>,
+    count: IntValue<'ctx>,
     dtype: ArrayDtype,
-    with_newline: bool,
 ) {
     let printf = compiler.runtime.add_printf(&compiler.module);
-    let base = compiler.extract_array_ptr(arr_obj);
-    let len = array_len(compiler, base);
-    let data = data_ptr(compiler, base);
     let is_int = dtype == ArrayDtype::Int;
-
     let lbracket = compiler
         .builder
         .build_global_string_ptr("[", "arr_lbracket")
@@ -945,11 +1027,11 @@ pub fn print_array<'ctx>(
         .unwrap();
 
     let zero = compiler.context.i64_type().const_int(0, false);
-    emit_counted_loop(compiler, len, |compiler, i| {
+    emit_counted_loop(compiler, count, |compiler, k| {
         // Separate elements with a single space (before every element but the first).
         let needs_space = compiler
             .builder
-            .build_int_compare(inkwell::IntPredicate::UGT, i, zero, "needs_space")
+            .build_int_compare(inkwell::IntPredicate::UGT, k, zero, "needs_space")
             .unwrap();
         let current_fn = compiler
             .builder
@@ -967,7 +1049,6 @@ pub fn print_array<'ctx>(
             .builder
             .build_conditional_branch(needs_space, space_bb, elem_bb)
             .unwrap();
-
         compiler.builder.position_at_end(space_bb);
         compiler
             .builder
@@ -979,14 +1060,15 @@ pub fn print_array<'ctx>(
             .unwrap();
 
         compiler.builder.position_at_end(elem_bb);
+        let index = compiler.builder.build_int_add(start, k, "row_idx").unwrap();
         if is_int {
-            let elem = load_i64(compiler, data, i);
+            let elem = load_i64(compiler, data, index);
             compiler
                 .builder
                 .build_call(printf, &[elem_fmt.into(), elem.into()], "print_elem")
                 .unwrap();
         } else {
-            let elem = load_f64(compiler, data, i);
+            let elem = load_f64(compiler, data, index);
             compiler
                 .builder
                 .build_call(printf, &[elem_fmt.into(), elem.into()], "print_elem")
@@ -994,13 +1076,116 @@ pub fn print_array<'ctx>(
         }
         Ok(())
     })
-    .expect("array print loop");
+    .expect("row print loop");
 
     compiler
         .builder
         .build_call(printf, &[rbracket.into()], "print_rb")
         .unwrap();
+}
+
+/// Prints an array: a 1-D array as `[e0 e1 ...]` and a 2-D array as
+/// `[[..] [..]]` (dispatched on the runtime `ndim`), with a trailing newline
+/// when set. Elements are formatted per dtype (`%d` int, `%f` float).
+pub fn print_array<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
+    with_newline: bool,
+) {
+    let base = compiler.extract_array_ptr(arr_obj);
+    let data = data_ptr(compiler, base);
+    let two_d = is_2d(compiler, arr_obj);
+
+    let current_fn = compiler
+        .builder
+        .get_insert_block()
+        .unwrap()
+        .get_parent()
+        .unwrap();
+    let bb_2d = compiler.context.append_basic_block(current_fn, "print_2d");
+    let bb_1d = compiler.context.append_basic_block(current_fn, "print_1d");
+    let merge = compiler
+        .context
+        .append_basic_block(current_fn, "print_done");
+    compiler
+        .builder
+        .build_conditional_branch(two_d, bb_2d, bb_1d)
+        .unwrap();
+
+    // 2-D: outer `[`, one bracketed row per matrix row (space-separated), `]`.
+    compiler.builder.position_at_end(bb_2d);
+    {
+        let printf = compiler.runtime.add_printf(&compiler.module);
+        let rows = header_word(compiler, base, ROWS_WORD);
+        let cols = header_word(compiler, base, COLS_WORD);
+        let lbracket = compiler
+            .builder
+            .build_global_string_ptr("[", "arr_lbracket")
+            .unwrap()
+            .as_pointer_value();
+        let space_fmt = compiler
+            .format_strings
+            .get_space_format_string(&compiler.builder);
+        compiler
+            .builder
+            .build_call(printf, &[lbracket.into()], "print_outer_lb")
+            .unwrap();
+        let zero = compiler.context.i64_type().const_int(0, false);
+        emit_counted_loop(compiler, rows, |compiler, i| {
+            let needs_space = compiler
+                .builder
+                .build_int_compare(inkwell::IntPredicate::UGT, i, zero, "needs_space")
+                .unwrap();
+            let fnv = compiler
+                .builder
+                .get_insert_block()
+                .unwrap()
+                .get_parent()
+                .unwrap();
+            let sp = compiler.context.append_basic_block(fnv, "row_space");
+            let rw = compiler.context.append_basic_block(fnv, "row_print");
+            compiler
+                .builder
+                .build_conditional_branch(needs_space, sp, rw)
+                .unwrap();
+            compiler.builder.position_at_end(sp);
+            compiler
+                .builder
+                .build_call(printf, &[space_fmt.into()], "row_sep")
+                .unwrap();
+            compiler.builder.build_unconditional_branch(rw).unwrap();
+            compiler.builder.position_at_end(rw);
+            let start = compiler
+                .builder
+                .build_int_mul(i, cols, "row_start")
+                .unwrap();
+            print_flat_row(compiler, data, start, cols, dtype);
+            Ok(())
+        })
+        .expect("matrix print loop");
+        let rbracket = compiler
+            .builder
+            .build_global_string_ptr("]", "arr_rbracket")
+            .unwrap()
+            .as_pointer_value();
+        compiler
+            .builder
+            .build_call(printf, &[rbracket.into()], "print_outer_rb")
+            .unwrap();
+    }
+    compiler.builder.build_unconditional_branch(merge).unwrap();
+
+    // 1-D: a single bracketed row of all `size` elements.
+    compiler.builder.position_at_end(bb_1d);
+    let len = array_len(compiler, base);
+    let zero = compiler.context.i64_type().const_int(0, false);
+    print_flat_row(compiler, data, zero, len, dtype);
+    compiler.builder.build_unconditional_branch(merge).unwrap();
+
+    compiler.builder.position_at_end(merge);
     if with_newline {
+        let printf = compiler.runtime.add_printf(&compiler.module);
         let nl = compiler
             .format_strings
             .get_newline_format_string(&compiler.builder);
@@ -1084,7 +1269,7 @@ pub fn unary_map<'ctx>(
     let src_base = compiler.extract_array_ptr(arr_obj);
     let len = array_len(compiler, src_base);
     let src_data = data_ptr(compiler, src_base);
-    let base = alloc_array(compiler, len, DTYPE_F64)?;
+    let base = alloc_like(compiler, src_base, DTYPE_F64)?;
     let dst_data = data_ptr(compiler, base);
 
     emit_counted_loop(compiler, len, |compiler, i| {
@@ -1183,6 +1368,253 @@ pub fn dot<'ctx>(
         .unwrap()
         .into_float_value();
     Ok(compiler.create_pyobject_float(result))
+}
+
+// ============================================================================
+// 2-D arrays (matrices)
+// ============================================================================
+
+/// `np.array([[...], [...]])` — builds a row-major 2-D array from nested list
+/// literals. Row/column counts are known at compile time; each cell expression
+/// is compiled and stored per dtype.
+pub fn from_nested<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    rows: &[IRExpr],
+    dtype: ArrayDtype,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let i64_type = compiler.context.i64_type();
+    let nrows = rows.len();
+    let ncols = match rows.first() {
+        Some(IRExpr::List(cells)) => cells.len(),
+        _ => {
+            return Err(CodeGenError::UnsupportedFeature(
+                "np.array expects a list of rows".to_string(),
+            ))
+        }
+    };
+
+    let base = alloc_array_2d(
+        compiler,
+        i64_type.const_int(nrows as u64, false),
+        i64_type.const_int(ncols as u64, false),
+        dtype_tag(dtype),
+    )?;
+    let data = data_ptr(compiler, base);
+
+    for (i, row) in rows.iter().enumerate() {
+        let cells = match row {
+            IRExpr::List(cells) if cells.len() == ncols => cells,
+            _ => {
+                return Err(CodeGenError::UnsupportedFeature(
+                    "np.array rows must all have the same length".to_string(),
+                ))
+            }
+        };
+        for (j, cell) in cells.iter().enumerate() {
+            let boxed = compiler.compile_expression(cell)?;
+            let idx = i64_type.const_int((i * ncols + j) as u64, false);
+            match dtype {
+                ArrayDtype::Int => {
+                    let v = compiler.extract_int(boxed);
+                    store_i64(compiler, data, idx, v);
+                }
+                _ => {
+                    let v = compiler.extract_payload(boxed);
+                    store_f64(compiler, data, idx, v);
+                }
+            }
+        }
+    }
+    Ok(compiler.create_pyobject_array(base))
+}
+
+/// `a[i, j]` — loads element `(i, j)` of a 2-D array, boxed per dtype.
+pub fn index_2d<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    row_obj: IntValue<'ctx>,
+    col_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
+) -> IntValue<'ctx> {
+    let base = compiler.extract_array_ptr(arr_obj);
+    let cols = header_word(compiler, base, COLS_WORD);
+    let data = data_ptr(compiler, base);
+    let i = scalar_to_i64(compiler, row_obj);
+    let j = scalar_to_i64(compiler, col_obj);
+    let row_off = compiler.builder.build_int_mul(i, cols, "row_off").unwrap();
+    let index = compiler
+        .builder
+        .build_int_add(row_off, j, "flat_idx")
+        .unwrap();
+    match dtype {
+        ArrayDtype::Int => {
+            let v = load_i64(compiler, data, index);
+            compiler.create_pyobject_int(v)
+        }
+        _ => {
+            let v = load_f64(compiler, data, index);
+            compiler.create_pyobject_float(v)
+        }
+    }
+}
+
+/// `a.T` — transpose of a 2-D array (a fresh copy with swapped dimensions).
+pub fn transpose<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let src_base = compiler.extract_array_ptr(arr_obj);
+    let rows = header_word(compiler, src_base, ROWS_WORD);
+    let cols = header_word(compiler, src_base, COLS_WORD);
+    let src_data = data_ptr(compiler, src_base);
+
+    let dst_base = alloc_array_2d(compiler, cols, rows, dtype_tag(dtype))?;
+    let dst_data = data_ptr(compiler, dst_base);
+    let is_int = dtype == ArrayDtype::Int;
+
+    // for i in 0..rows: for j in 0..cols: dst[j*rows + i] = src[i*cols + j]
+    emit_counted_loop(compiler, rows, |compiler, i| {
+        emit_counted_loop(compiler, cols, |compiler, j| {
+            let src_off = {
+                let r = compiler.builder.build_int_mul(i, cols, "src_row").unwrap();
+                compiler.builder.build_int_add(r, j, "src_idx").unwrap()
+            };
+            let dst_off = {
+                let r = compiler.builder.build_int_mul(j, rows, "dst_row").unwrap();
+                compiler.builder.build_int_add(r, i, "dst_idx").unwrap()
+            };
+            if is_int {
+                let v = load_i64(compiler, src_data, src_off);
+                store_i64(compiler, dst_data, dst_off, v);
+            } else {
+                let v = load_f64(compiler, src_data, src_off);
+                store_f64(compiler, dst_data, dst_off, v);
+            }
+            Ok(())
+        })
+    })?;
+    Ok(compiler.create_pyobject_array(dst_base))
+}
+
+/// `np.dot(A, B)` for 2-D arrays — matrix multiply `(m×n) · (n×p) = (m×p)`.
+pub fn matmul<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    a_obj: IntValue<'ctx>,
+    b_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let a_base = compiler.extract_array_ptr(a_obj);
+    let b_base = compiler.extract_array_ptr(b_obj);
+    let m = header_word(compiler, a_base, ROWS_WORD);
+    let n = header_word(compiler, a_base, COLS_WORD);
+    let p = header_word(compiler, b_base, COLS_WORD);
+    let a_data = data_ptr(compiler, a_base);
+    let b_data = data_ptr(compiler, b_base);
+
+    let c_base = alloc_array_2d(compiler, m, p, dtype_tag(dtype))?;
+    let c_data = data_ptr(compiler, c_base);
+    let is_int = dtype == ArrayDtype::Int;
+    let i64_type = compiler.context.i64_type();
+    let f64_type = compiler.context.f64_type();
+
+    // for i in 0..m: for j in 0..p: acc=0; for k in 0..n: acc += A[i*n+k]*B[k*p+j]
+    emit_counted_loop(compiler, m, |compiler, i| {
+        emit_counted_loop(compiler, p, |compiler, j| {
+            let acc_ptr = if is_int {
+                let a = compiler.builder.build_alloca(i64_type, "acc").unwrap();
+                compiler
+                    .builder
+                    .build_store(a, i64_type.const_int(0, false))
+                    .unwrap();
+                a
+            } else {
+                let a = compiler.builder.build_alloca(f64_type, "acc").unwrap();
+                compiler
+                    .builder
+                    .build_store(a, f64_type.const_float(0.0))
+                    .unwrap();
+                a
+            };
+            emit_counted_loop(compiler, n, |compiler, k| {
+                let a_off = {
+                    let r = compiler.builder.build_int_mul(i, n, "a_row").unwrap();
+                    compiler.builder.build_int_add(r, k, "a_idx").unwrap()
+                };
+                let b_off = {
+                    let r = compiler.builder.build_int_mul(k, p, "b_row").unwrap();
+                    compiler.builder.build_int_add(r, j, "b_idx").unwrap()
+                };
+                if is_int {
+                    let x = load_i64(compiler, a_data, a_off);
+                    let y = load_i64(compiler, b_data, b_off);
+                    let prod = compiler.builder.build_int_mul(x, y, "prod").unwrap();
+                    let cur = compiler
+                        .builder
+                        .build_load(i64_type, acc_ptr, "acc_cur")
+                        .unwrap()
+                        .into_int_value();
+                    let next = compiler
+                        .builder
+                        .build_int_add(cur, prod, "acc_next")
+                        .unwrap();
+                    compiler.builder.build_store(acc_ptr, next).unwrap();
+                } else {
+                    let x = load_f64(compiler, a_data, a_off);
+                    let y = load_f64(compiler, b_data, b_off);
+                    let prod = compiler.builder.build_float_mul(x, y, "prod").unwrap();
+                    let cur = compiler
+                        .builder
+                        .build_load(f64_type, acc_ptr, "acc_cur")
+                        .unwrap()
+                        .into_float_value();
+                    let next = compiler
+                        .builder
+                        .build_float_add(cur, prod, "acc_next")
+                        .unwrap();
+                    compiler.builder.build_store(acc_ptr, next).unwrap();
+                }
+                Ok(())
+            })?;
+            let c_off = {
+                let r = compiler.builder.build_int_mul(i, p, "c_row").unwrap();
+                compiler.builder.build_int_add(r, j, "c_idx").unwrap()
+            };
+            if is_int {
+                let v = compiler
+                    .builder
+                    .build_load(i64_type, acc_ptr, "acc_final")
+                    .unwrap()
+                    .into_int_value();
+                store_i64(compiler, c_data, c_off, v);
+            } else {
+                let v = compiler
+                    .builder
+                    .build_load(f64_type, acc_ptr, "acc_final")
+                    .unwrap()
+                    .into_float_value();
+                store_f64(compiler, c_data, c_off, v);
+            }
+            Ok(())
+        })
+    })?;
+    Ok(compiler.create_pyobject_array(c_base))
+}
+
+/// Whether an array is 2-D (`ndim == 2`), as an `i1` runtime value. Used by
+/// `np.dot` (dot product vs matmul) and printing (1-D vs 2-D layout).
+pub fn is_2d<'ctx>(compiler: &Compiler<'ctx>, arr_obj: IntValue<'ctx>) -> IntValue<'ctx> {
+    let base = compiler.extract_array_ptr(arr_obj);
+    let ndim = header_word(compiler, base, NDIM_WORD);
+    compiler
+        .builder
+        .build_int_compare(
+            inkwell::IntPredicate::EQ,
+            ndim,
+            compiler.context.i64_type().const_int(2, false),
+            "is_2d",
+        )
+        .unwrap()
 }
 
 /// Unboxes a scalar PyObject (int/float/bool) to an `i64` index value.

@@ -28,7 +28,28 @@ o = np.ones(4)                        # [1.0, 1.0, 1.0, 1.0]
 r = np.arange(5)                      # [0.0, 1.0, 2.0, 3.0, 4.0]
 ```
 
-All arrays are 1-dimensional.
+## 2-D arrays (matrices)
+
+Nested list literals build 2-D arrays. They support indexing `a[i, j]`,
+element-wise ops, reductions, transpose `.T`, and matrix multiply `np.matmul`:
+
+```python
+import numpy as np
+
+m = np.array([[1.0, 2.0, 3.0],
+              [4.0, 5.0, 6.0]])   # 2x3
+print(m)          # [[1. 2. 3.] [4. 5. 6.]]
+print(m[1, 2])    # 6.0
+print(m.sum())    # 21.0
+print(m.T)        # [[1. 4.] [2. 5.] [3. 6.]]  (3x2)
+
+n = np.array([[1.0, 2.0], [3.0, 4.0]])
+print(n + n)                # [[2. 4.] [6. 8.]]   (element-wise)
+print(np.matmul(n, n))      # [[7. 10.] [15. 22.]] (matrix product)
+```
+
+Integer matrices work the same way (`np.array([[1, 2], [3, 4]])`). Use
+`np.matmul` for matrices and `np.dot` for 1-D vector dot products.
 
 ## dtypes (`int64` / `float64`)
 
@@ -190,8 +211,8 @@ The subset keeps growing. Not yet supported:
 
 - **dtypes other than `int64`/`float64`** (e.g. `bool`, `float32`), and an
   explicit `dtype=` argument.
-- **Multiple dimensions** — arrays are 1-D (the header already carries `ndim`
-  so this can grow without a layout change).
+- **More than 2 dimensions**, `.shape`/`reshape` (they need tuples), 2-D item
+  assignment (`a[i, j] = x`), and row indexing of a matrix (`m[i]`).
 - **Slice assignment** (`a[1:3] = ...`), fancy/boolean indexing, negative
   indices, and slice steps. Single-element item assignment and copy-slicing
   *are* supported.

@@ -170,6 +170,30 @@ s = a[:]
     }
 }
 
+#[test]
+fn test_multi_index_lowers_to_index_nd() {
+    let source = r#"
+import numpy as np
+m = np.array([[1.0, 2.0], [3.0, 4.0]])
+x = m[1, 0]
+"#;
+    let ast = parser::parse_program(source).unwrap();
+    let ir = lowering::lower_program(&ast).unwrap();
+
+    match &ir[1] {
+        ast::IRStmt::Assign { value, .. } => match value {
+            ast::IRExpr::IndexND { array, indices } => {
+                assert_eq!(**array, ast::IRExpr::Variable("m".to_string()));
+                assert_eq!(indices.len(), 2);
+                assert_eq!(indices[0], ast::IRExpr::Constant(1));
+                assert_eq!(indices[1], ast::IRExpr::Constant(0));
+            }
+            other => panic!("Expected IndexND, got {other:?}"),
+        },
+        other => panic!("Expected Assign, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Interprocedural arrayness analysis
 // ---------------------------------------------------------------------------
@@ -487,6 +511,25 @@ print(a + f)
 print(a / 2)
 print(a.mean())
 print(np.sqrt(a))
+"#;
+    insta::assert_snapshot!(compile(source));
+}
+
+#[test]
+fn test_2d_matrices() {
+    let source = r#"
+import numpy as np
+m = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+print(m)
+print(m[1, 2])
+print(m.sum())
+print(m.T)
+n = np.array([[1.0, 2.0], [3.0, 4.0]])
+print(n + n)
+print(np.matmul(n, n))
+im = np.array([[1, 2], [3, 4]])
+print(im)
+print(np.matmul(im, im))
 "#;
     insta::assert_snapshot!(compile(source));
 }

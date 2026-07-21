@@ -97,20 +97,33 @@ pub fn numpy_call_dtype(
     if is_numpy_ufunc(func) {
         return args.first().and_then(&arg_dtype).map(|_| ArrayDtype::Float);
     }
+    // `np.matmul(A, B)` returns a 2-D array; its dtype promotes the operands.
+    if func == "matmul" {
+        let a = args.first().and_then(&arg_dtype);
+        let b = args.get(1).and_then(&arg_dtype);
+        return Some(match (a, b) {
+            (Some(x), Some(y)) => x.promote(y),
+            _ => ArrayDtype::Float,
+        });
+    }
     None
 }
 
-/// Infers the dtype of `np.array(arg)` from its literal argument.
+/// Infers the dtype of `np.array(arg)` from its literal argument: `Int` if every
+/// (possibly nested) leaf is an integer literal, else `Float`.
 fn array_literal_dtype(arg: Option<&IRExpr>) -> ArrayDtype {
     match arg {
-        Some(IRExpr::List(elts)) if elts.iter().all(is_int_literal) => ArrayDtype::Int,
+        Some(IRExpr::List(elts)) if elts.iter().all(all_int_leaves) => ArrayDtype::Int,
         _ => ArrayDtype::Float,
     }
 }
 
-/// Whether an expression is an integer-typed literal (`int` or `bool`).
-fn is_int_literal(expr: &IRExpr) -> bool {
-    matches!(expr, IRExpr::Constant(_) | IRExpr::Bool(_))
+/// Whether every leaf of a (possibly nested) list literal is an integer literal.
+fn all_int_leaves(expr: &IRExpr) -> bool {
+    match expr {
+        IRExpr::List(elts) => elts.iter().all(all_int_leaves),
+        other => matches!(other, IRExpr::Constant(_) | IRExpr::Bool(_)),
+    }
 }
 
 /// The dtype a *scalar* operand contributes to promotion. Integer literals count
@@ -345,6 +358,12 @@ fn analyze_expr(expr: &IRExpr, ctx: &Ctx, prev: &ArraynessInfo, info: &mut Array
             analyze_expr(list, ctx, prev, info);
             analyze_expr(index, ctx, prev, info);
         }
+        IRExpr::IndexND { array, indices } => {
+            analyze_expr(array, ctx, prev, info);
+            for idx in indices {
+                analyze_expr(idx, ctx, prev, info);
+            }
+        }
         IRExpr::Slice {
             value,
             lower,
@@ -384,6 +403,8 @@ fn expr_array_dtype(expr: &IRExpr, ctx: &Ctx, info: &ArraynessInfo) -> Option<Ar
             numpy_call_dtype(func, args, |a| expr_array_dtype(a, ctx, info))
         }
         IRExpr::Slice { value, .. } => expr_array_dtype(value, ctx, info),
+        // `a.T` (transpose) is an array of the same dtype as `a`.
+        IRExpr::Attribute { value, attr } if attr == "T" => expr_array_dtype(value, ctx, info),
         IRExpr::BinaryOp { op, left, right }
             if matches!(
                 op,

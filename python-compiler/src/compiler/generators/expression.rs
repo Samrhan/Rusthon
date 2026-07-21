@@ -365,6 +365,25 @@ pub fn compile_index<'ctx>(
     Ok(elem)
 }
 
+/// Compiles a multi-dimensional index `a[i, j]`. Only 2-D full indexing (two
+/// indices) is supported; the element is boxed per the array dtype.
+pub fn compile_index_nd<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    array: &IRExpr,
+    indices: &[IRExpr],
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    if indices.len() != 2 {
+        return Err(CodeGenError::UnsupportedFeature(
+            "only 2-D indexing `a[i, j]` is supported".to_string(),
+        ));
+    }
+    let dtype = compiler.require_known_array_dtype(array)?;
+    let arr = compiler.compile_expression(array)?;
+    let i = compiler.compile_expression(&indices[0])?;
+    let j = compiler.compile_expression(&indices[1])?;
+    Ok(ndarray::index_2d(compiler, arr, i, j, dtype))
+}
+
 /// Compiles an array slice `value[lower:upper]` (copy semantics).
 ///
 /// Only arrays can be sliced in this subset; a definitely-scalar receiver is a

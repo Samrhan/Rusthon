@@ -73,6 +73,11 @@ pub enum IRExpr {
         list: Box<IRExpr>,
         index: Box<IRExpr>,
     },
+    /// Multi-dimensional array indexing, e.g. `a[i, j]`.
+    IndexND {
+        array: Box<IRExpr>,
+        indices: Vec<IRExpr>,
+    },
     /// Array slicing `value[lower:upper]` with copy semantics.
     ///
     /// Omitted bounds default to `0` (lower) and the length (upper); a step is

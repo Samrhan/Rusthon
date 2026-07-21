@@ -78,9 +78,17 @@ pub fn compile_attribute<'ctx>(
     value: &IRExpr,
     attr: &str,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
-    let obj = compiler.compile_expression(value)?;
     match attr {
-        "size" => Ok(ndarray::size(compiler, obj)),
+        "size" => {
+            let obj = compiler.compile_expression(value)?;
+            Ok(ndarray::size(compiler, obj))
+        }
+        // `a.T` — transpose of a 2-D array.
+        "T" => {
+            let dtype = compiler.require_known_array_dtype(value)?;
+            let obj = compiler.compile_expression(value)?;
+            ndarray::transpose(compiler, obj, dtype)
+        }
         other => Err(CodeGenError::UnsupportedFeature(format!(
             "unknown attribute '.{other}'"
         ))),
@@ -115,6 +123,12 @@ fn compile_numpy_call<'ctx>(
             let dtype =
                 arrayness::numpy_call_dtype("array", args, |a| compiler.expr_array_dtype(a))
                     .unwrap_or(ArrayDtype::Float);
+            // Nested lists `[[..], [..]]` build a 2-D array.
+            if let IRExpr::List(rows) = &args[0] {
+                if !rows.is_empty() && rows.iter().all(|r| matches!(r, IRExpr::List(_))) {
+                    return ndarray::from_nested(compiler, rows, dtype);
+                }
+            }
             let list = compiler.compile_expression(&args[0])?;
             ndarray::from_list(compiler, list, dtype)
         }
@@ -164,7 +178,7 @@ fn compile_numpy_call<'ctx>(
             let arr = compiler.compile_expression(&args[0])?;
             ndarray::reduce_prod(compiler, arr, dtype)
         }
-        // Linear algebra: 1-D dot product.
+        // Linear algebra: 1-D dot product (scalar).
         "dot" => {
             expect_argc(func, args, 2)?;
             let a_dtype = compiler.require_known_array_dtype(&args[0])?;
@@ -172,6 +186,20 @@ fn compile_numpy_call<'ctx>(
             let a = compiler.compile_expression(&args[0])?;
             let b = compiler.compile_expression(&args[1])?;
             ndarray::dot(compiler, a, b, a_dtype, b_dtype)
+        }
+        // 2-D matrix multiply (returns an array).
+        "matmul" => {
+            expect_argc(func, args, 2)?;
+            let a_dtype = compiler.require_known_array_dtype(&args[0])?;
+            let b_dtype = compiler.require_known_array_dtype(&args[1])?;
+            let result = if a_dtype == ArrayDtype::Int && b_dtype == ArrayDtype::Int {
+                ArrayDtype::Int
+            } else {
+                ArrayDtype::Float
+            };
+            let a = compiler.compile_expression(&args[0])?;
+            let b = compiler.compile_expression(&args[1])?;
+            ndarray::matmul(compiler, a, b, result)
         }
         // Constants (lowered to zero-argument module calls).
         "pi" => Ok(compiler.create_pyobject_float(

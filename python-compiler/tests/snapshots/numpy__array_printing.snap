@@ -5,7 +5,7 @@ expression: compile(source)
 ; ModuleID = 'main'
 source_filename = "main"
 
-@float_format_no_nl = private unnamed_addr constant [3 x i8] c"%f\00", align 1
+@float_format_no_nl.6 = private unnamed_addr constant [3 x i8] c"%f\00", align 1
 
 ; Function Attrs: nofree nounwind
 define noundef i32 @main() local_unnamed_addr #0 {
@@ -23,27 +23,31 @@ entry:
   %payload_to_list_ptr = inttoptr i64 %list_ptr_payload to ptr
   %list_len = load i64, ptr %payload_to_list_ptr, align 4
   %arr_words = shl i64 %list_len, 3
-  %arr_bytes = add i64 %arr_words, 24
+  %arr_bytes = add i64 %arr_words, 40
   %malloc_arr = tail call ptr @malloc(i64 %arr_bytes)
-  %malloc_arr27 = ptrtoint ptr %malloc_arr to i64
+  %malloc_arr80 = ptrtoint ptr %malloc_arr to i64
   store i64 0, ptr %malloc_arr, align 4
-  %hdr_ptr2 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
-  store i64 1, ptr %hdr_ptr2, align 4
-  %hdr_ptr3 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
-  store i64 %list_len, ptr %hdr_ptr3, align 4
-  %data_ptr = getelementptr inbounds i64, ptr %malloc_arr, i64 3
-  %loop_cont21.not = icmp eq i64 %list_len, 0
-  br i1 %loop_cont21.not, label %arr_loop_end, label %arr_loop_body.preheader
+  %hdr_ptr2 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
+  store i64 %list_len, ptr %hdr_ptr2, align 4
+  %hdr_ptr3 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
+  store i64 1, ptr %hdr_ptr3, align 4
+  %hdr_ptr4 = getelementptr inbounds i64, ptr %malloc_arr, i64 3
+  store i64 %list_len, ptr %hdr_ptr4, align 4
+  %hdr_ptr5 = getelementptr inbounds i64, ptr %malloc_arr, i64 4
+  store i64 1, ptr %hdr_ptr5, align 4
+  %data_ptr = getelementptr inbounds i64, ptr %malloc_arr, i64 5
+  %loop_cont65.not = icmp eq i64 %list_len, 0
+  br i1 %loop_cont65.not, label %arr_loop_end, label %arr_loop_body.preheader
 
 arr_loop_body.preheader:                          ; preds = %entry
   %min.iters.check = icmp ult i64 %list_len, 6
-  br i1 %min.iters.check, label %arr_loop_body.preheader28, label %vector.memcheck
+  br i1 %min.iters.check, label %arr_loop_body.preheader82, label %vector.memcheck
 
 vector.memcheck:                                  ; preds = %arr_loop_body.preheader
-  %0 = add i64 %malloc_arr27, 16
+  %0 = add i64 %malloc_arr80, 32
   %1 = sub i64 %0, %list_ptr_payload
   %diff.check = icmp ult i64 %1, 16
-  br i1 %diff.check, label %arr_loop_body.preheader28, label %vector.ph
+  br i1 %diff.check, label %arr_loop_body.preheader82, label %vector.ph
 
 vector.ph:                                        ; preds = %vector.memcheck
   %n.vec = and i64 %list_len, -2
@@ -71,15 +75,15 @@ vector.body:                                      ; preds = %vector.body, %vecto
 
 middle.block:                                     ; preds = %vector.body
   %cmp.n = icmp eq i64 %list_len, %n.vec
-  br i1 %cmp.n, label %arr_loop_end, label %arr_loop_body.preheader28
+  br i1 %cmp.n, label %arr_loop_end, label %arr_loop_body.preheader82
 
-arr_loop_body.preheader28:                        ; preds = %vector.memcheck, %arr_loop_body.preheader, %middle.block
-  %i.022.ph = phi i64 [ 0, %vector.memcheck ], [ 0, %arr_loop_body.preheader ], [ %n.vec, %middle.block ]
+arr_loop_body.preheader82:                        ; preds = %vector.memcheck, %arr_loop_body.preheader, %middle.block
+  %i.066.ph = phi i64 [ 0, %vector.memcheck ], [ 0, %arr_loop_body.preheader ], [ %n.vec, %middle.block ]
   br label %arr_loop_body
 
-arr_loop_body:                                    ; preds = %arr_loop_body.preheader28, %arr_loop_body
-  %i.022 = phi i64 [ %list_idx, %arr_loop_body ], [ %i.022.ph, %arr_loop_body.preheader28 ]
-  %list_idx = add nuw i64 %i.022, 1
+arr_loop_body:                                    ; preds = %arr_loop_body.preheader82, %arr_loop_body
+  %i.066 = phi i64 [ %list_idx, %arr_loop_body ], [ %i.066.ph, %arr_loop_body.preheader82 ]
+  %list_idx = add nuw i64 %i.066, 1
   %list_elem_ptr = getelementptr inbounds i64, ptr %payload_to_list_ptr, i64 %list_idx
   %boxed_elem = load i64, ptr %list_elem_ptr, align 4
   %check_qnan = and i64 %boxed_elem, 9221120237041090560
@@ -91,7 +95,7 @@ arr_loop_body:                                    ; preds = %arr_loop_body.prehe
   %signed_payload = or disjoint i64 %masksel, %extract_payload
   %payload_to_f64 = sitofp i64 %signed_payload to double
   %final_payload = select i1 %is_float.not, double %payload_to_f64, double %i64_to_f64
-  %elem_ptr = getelementptr inbounds double, ptr %data_ptr, i64 %i.022
+  %elem_ptr = getelementptr inbounds double, ptr %data_ptr, i64 %i.066
   store double %final_payload, ptr %elem_ptr, align 8
   %loop_cont = icmp ult i64 %list_idx, %list_len
   br i1 %loop_cont, label %arr_loop_body, label %arr_loop_end, !llvm.loop !3
@@ -100,33 +104,89 @@ arr_loop_end:                                     ; preds = %arr_loop_body, %mid
   %arr_ptr_to_int = ptrtoint ptr %malloc_arr to i64
   %arr_ptr_payload = and i64 %arr_ptr_to_int, 281474976710655
   %payload_to_arr_ptr = inttoptr i64 %arr_ptr_payload to ptr
+  %data_ptr8 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 5
+  %hdr_ptr11 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 1
+  %hdr_val = load i64, ptr %hdr_ptr11, align 4
+  %is_2d = icmp eq i64 %hdr_val, 2
+  br i1 %is_2d, label %print_2d, label %print_1d
+
+print_2d:                                         ; preds = %arr_loop_end
+  %hdr_ptr12 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
+  %hdr_val13 = load i64, ptr %hdr_ptr12, align 4
+  %hdr_ptr14 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 4
+  %hdr_val15 = load i64, ptr %hdr_ptr14, align 4
+  %putchar56 = tail call i32 @putchar(i32 91)
+  %loop_cont2171.not = icmp eq i64 %hdr_val13, 0
+  br i1 %loop_cont2171.not, label %print_done, label %arr_loop_body18.lr.ph
+
+arr_loop_body18.lr.ph:                            ; preds = %print_2d
+  %loop_cont2869.not = icmp eq i64 %hdr_val15, 0
+  %loop_cont28.peel.not = icmp eq i64 %hdr_val15, 1
+  br label %arr_loop_body18
+
+print_1d:                                         ; preds = %arr_loop_end
   %size_ptr = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 2
   %arr_size = load i64, ptr %size_ptr, align 4
-  %data_ptr6 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
   %putchar = tail call i32 @putchar(i32 91)
-  %loop_cont1223.not = icmp eq i64 %arr_size, 0
-  br i1 %loop_cont1223.not, label %arr_loop_end10, label %print_elem.peel
+  %loop_cont4167.not = icmp eq i64 %arr_size, 0
+  br i1 %loop_cont4167.not, label %print_done, label %print_elem45.peel
 
-print_elem.peel:                                  ; preds = %arr_loop_end
-  %elem.peel.pre = load double, ptr %data_ptr6, align 8
-  %print_elem15.peel = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_no_nl, double %elem.peel.pre)
-  %loop_cont12.peel.not = icmp eq i64 %arr_size, 1
-  br i1 %loop_cont12.peel.not, label %arr_loop_end10, label %print_elem
+print_elem45.peel:                                ; preds = %print_1d
+  %elem49.peel.pre = load double, ptr %data_ptr8, align 8
+  %print_elem50.peel = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_no_nl.6, double %elem49.peel.pre)
+  %loop_cont41.peel.not = icmp eq i64 %arr_size, 1
+  br i1 %loop_cont41.peel.not, label %print_done, label %print_elem45
 
-arr_loop_end10:                                   ; preds = %print_elem, %print_elem.peel, %arr_loop_end
-  %putchar18 = tail call i32 @putchar(i32 93)
-  %putchar19 = tail call i32 @putchar(i32 10)
+print_done:                                       ; preds = %print_elem45, %arr_loop_end26, %print_1d, %print_elem45.peel, %print_2d
+  %putchar54 = tail call i32 @putchar(i32 93)
+  %putchar59 = tail call i32 @putchar(i32 10)
   ret i32 0
 
+arr_loop_body18:                                  ; preds = %arr_loop_body18.lr.ph, %arr_loop_end26
+  %storemerge5772 = phi i64 [ 0, %arr_loop_body18.lr.ph ], [ %i_next34, %arr_loop_end26 ]
+  %needs_space.not = icmp eq i64 %storemerge5772, 0
+  br i1 %needs_space.not, label %row_print, label %row_space
+
+row_space:                                        ; preds = %arr_loop_body18
+  %putchar60 = tail call i32 @putchar(i32 32)
+  br label %row_print
+
+row_print:                                        ; preds = %row_space, %arr_loop_body18
+  %putchar61 = tail call i32 @putchar(i32 91)
+  br i1 %loop_cont2869.not, label %arr_loop_end26, label %print_elem.peel
+
+print_elem.peel:                                  ; preds = %row_print
+  %row_start = mul i64 %storemerge5772, %hdr_val15
+  %15 = getelementptr double, ptr %data_ptr8, i64 %row_start
+  %elem.peel.pre = load double, ptr %15, align 8
+  %print_elem32.peel = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_no_nl.6, double %elem.peel.pre)
+  br i1 %loop_cont28.peel.not, label %arr_loop_end26, label %print_elem
+
+arr_loop_end26:                                   ; preds = %print_elem, %print_elem.peel, %row_print
+  %putchar63 = tail call i32 @putchar(i32 93)
+  %i_next34 = add nuw i64 %storemerge5772, 1
+  %loop_cont21 = icmp ult i64 %i_next34, %hdr_val13
+  br i1 %loop_cont21, label %arr_loop_body18, label %print_done
+
 print_elem:                                       ; preds = %print_elem.peel, %print_elem
-  %storemerge24 = phi i64 [ %i_next16, %print_elem ], [ 1, %print_elem.peel ]
-  %putchar20 = tail call i32 @putchar(i32 32)
-  %elem_ptr14 = getelementptr inbounds double, ptr %data_ptr6, i64 %storemerge24
-  %elem = load double, ptr %elem_ptr14, align 8
-  %print_elem15 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_no_nl, double %elem)
-  %i_next16 = add nuw i64 %storemerge24, 1
-  %loop_cont12 = icmp ult i64 %i_next16, %arr_size
-  br i1 %loop_cont12, label %print_elem, label %arr_loop_end10, !llvm.loop !4
+  %storemerge6270 = phi i64 [ %i_next33, %print_elem ], [ 1, %print_elem.peel ]
+  %putchar64 = tail call i32 @putchar(i32 32)
+  %elem_ptr31 = getelementptr double, ptr %15, i64 %storemerge6270
+  %elem = load double, ptr %elem_ptr31, align 8
+  %print_elem32 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_no_nl.6, double %elem)
+  %i_next33 = add nuw i64 %storemerge6270, 1
+  %loop_cont28 = icmp ult i64 %i_next33, %hdr_val15
+  br i1 %loop_cont28, label %print_elem, label %arr_loop_end26, !llvm.loop !4
+
+print_elem45:                                     ; preds = %print_elem45.peel, %print_elem45
+  %storemerge68 = phi i64 [ %i_next51, %print_elem45 ], [ 1, %print_elem45.peel ]
+  %putchar55 = tail call i32 @putchar(i32 32)
+  %elem_ptr48 = getelementptr inbounds double, ptr %data_ptr8, i64 %storemerge68
+  %elem49 = load double, ptr %elem_ptr48, align 8
+  %print_elem50 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @float_format_no_nl.6, double %elem49)
+  %i_next51 = add nuw i64 %storemerge68, 1
+  %loop_cont41 = icmp ult i64 %i_next51, %arr_size
+  br i1 %loop_cont41, label %print_elem45, label %print_done, !llvm.loop !6
 }
 
 ; Function Attrs: mustprogress nofree nounwind willreturn allockind("alloc,uninitialized") allocsize(0) memory(inaccessiblemem: readwrite)
@@ -147,3 +207,4 @@ attributes #1 = { mustprogress nofree nounwind willreturn allockind("alloc,unini
 !3 = distinct !{!3, !1}
 !4 = distinct !{!4, !5}
 !5 = !{!"llvm.loop.peeled.count", i32 1}
+!6 = distinct !{!6, !5}

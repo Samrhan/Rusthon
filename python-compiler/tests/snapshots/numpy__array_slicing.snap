@@ -10,57 +10,65 @@ source_filename = "main"
 ; Function Attrs: nofree nounwind
 define noundef i32 @main() local_unnamed_addr #0 {
 entry:
-  %malloc_arr = tail call dereferenceable_or_null(72) ptr @malloc(i64 72)
+  %malloc_arr = tail call dereferenceable_or_null(88) ptr @malloc(i64 88)
   store i64 1, ptr %malloc_arr, align 4
-  %hdr_ptr1 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
-  store i64 1, ptr %hdr_ptr1, align 4
-  %hdr_ptr2 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
-  store i64 6, ptr %hdr_ptr2, align 4
-  %data_ptr = getelementptr inbounds i64, ptr %malloc_arr, i64 3
+  %hdr_ptr1 = getelementptr inbounds i64, ptr %malloc_arr, i64 2
+  store i64 6, ptr %hdr_ptr1, align 4
+  %hdr_ptr2 = getelementptr inbounds i64, ptr %malloc_arr, i64 1
+  store i64 1, ptr %hdr_ptr2, align 4
+  %hdr_ptr3 = getelementptr inbounds i64, ptr %malloc_arr, i64 3
+  store i64 6, ptr %hdr_ptr3, align 4
+  %hdr_ptr4 = getelementptr inbounds i64, ptr %malloc_arr, i64 4
+  store i64 1, ptr %hdr_ptr4, align 4
+  %data_ptr = getelementptr inbounds i64, ptr %malloc_arr, i64 5
   store i64 0, ptr %data_ptr, align 4
-  %elem_ptr.1 = getelementptr inbounds i64, ptr %malloc_arr, i64 4
+  %elem_ptr.1 = getelementptr inbounds i64, ptr %malloc_arr, i64 6
   store i64 1, ptr %elem_ptr.1, align 4
-  %elem_ptr.2 = getelementptr inbounds i64, ptr %malloc_arr, i64 5
+  %elem_ptr.2 = getelementptr inbounds i64, ptr %malloc_arr, i64 7
   store i64 2, ptr %elem_ptr.2, align 4
-  %elem_ptr.3 = getelementptr inbounds i64, ptr %malloc_arr, i64 6
+  %elem_ptr.3 = getelementptr inbounds i64, ptr %malloc_arr, i64 8
   store i64 3, ptr %elem_ptr.3, align 4
-  %elem_ptr.4 = getelementptr inbounds i64, ptr %malloc_arr, i64 7
+  %elem_ptr.4 = getelementptr inbounds i64, ptr %malloc_arr, i64 9
   store i64 4, ptr %elem_ptr.4, align 4
-  %elem_ptr.5 = getelementptr inbounds i64, ptr %malloc_arr, i64 8
+  %elem_ptr.5 = getelementptr inbounds i64, ptr %malloc_arr, i64 10
   store i64 5, ptr %elem_ptr.5, align 4
   %arr_ptr_to_int = ptrtoint ptr %malloc_arr to i64
   %arr_ptr_payload = and i64 %arr_ptr_to_int, 281474976710655
   %payload_to_arr_ptr = inttoptr i64 %arr_ptr_payload to ptr
   %size_ptr = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 2
   %arr_size = load i64, ptr %size_ptr, align 4
-  %data_ptr5 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 3
+  %data_ptr7 = getelementptr inbounds i64, ptr %payload_to_arr_ptr, i64 5
   %clamp_hi = tail call i64 @llvm.smin.i64(i64 %arr_size, i64 1)
-  %clamp_hi7 = tail call i64 @llvm.smin.i64(i64 %arr_size, i64 4)
-  %slice_len = sub i64 %clamp_hi7, %clamp_hi
+  %clamp_hi9 = tail call i64 @llvm.smin.i64(i64 %arr_size, i64 4)
+  %slice_len = sub i64 %clamp_hi9, %clamp_hi
   %arr_words = shl i64 %slice_len, 3
-  %arr_bytes = add i64 %arr_words, 24
-  %malloc_arr8 = tail call ptr @malloc(i64 %arr_bytes)
-  %malloc_arr8275 = ptrtoint ptr %malloc_arr8 to i64
-  store i64 1, ptr %malloc_arr8, align 4
-  %hdr_ptr10 = getelementptr inbounds i64, ptr %malloc_arr8, i64 1
-  store i64 1, ptr %hdr_ptr10, align 4
-  %hdr_ptr11 = getelementptr inbounds i64, ptr %malloc_arr8, i64 2
-  store i64 %slice_len, ptr %hdr_ptr11, align 4
-  %data_ptr12 = getelementptr i64, ptr %malloc_arr8, i64 3
-  %loop_cont18236.not = icmp slt i64 %arr_size, 2
-  br i1 %loop_cont18236.not, label %arr_loop_end16, label %arr_loop_body15.lr.ph
+  %arr_bytes = add i64 %arr_words, 40
+  %malloc_arr10 = tail call ptr @malloc(i64 %arr_bytes)
+  %malloc_arr10283 = ptrtoint ptr %malloc_arr10 to i64
+  store i64 1, ptr %malloc_arr10, align 4
+  %hdr_ptr12 = getelementptr inbounds i64, ptr %malloc_arr10, i64 2
+  store i64 %slice_len, ptr %hdr_ptr12, align 4
+  %hdr_ptr13 = getelementptr inbounds i64, ptr %malloc_arr10, i64 1
+  store i64 1, ptr %hdr_ptr13, align 4
+  %hdr_ptr14 = getelementptr inbounds i64, ptr %malloc_arr10, i64 3
+  store i64 %slice_len, ptr %hdr_ptr14, align 4
+  %hdr_ptr15 = getelementptr inbounds i64, ptr %malloc_arr10, i64 4
+  store i64 1, ptr %hdr_ptr15, align 4
+  %data_ptr16 = getelementptr i64, ptr %malloc_arr10, i64 5
+  %loop_cont22244.not = icmp slt i64 %arr_size, 2
+  br i1 %loop_cont22244.not, label %arr_loop_end20, label %arr_loop_body19.lr.ph
 
-arr_loop_body15.lr.ph:                            ; preds = %entry
-  %0 = getelementptr i64, ptr %data_ptr5, i64 %clamp_hi
+arr_loop_body19.lr.ph:                            ; preds = %entry
+  %0 = getelementptr i64, ptr %data_ptr7, i64 %clamp_hi
   %min.iters.check = icmp ult i64 %slice_len, 10
-  br i1 %min.iters.check, label %arr_loop_body15.preheader, label %vector.memcheck
+  br i1 %min.iters.check, label %arr_loop_body19.preheader, label %vector.memcheck
 
-vector.memcheck:                                  ; preds = %arr_loop_body15.lr.ph
+vector.memcheck:                                  ; preds = %arr_loop_body19.lr.ph
   %1 = shl nuw nsw i64 %clamp_hi, 3
   %2 = add nuw nsw i64 %arr_ptr_payload, %1
-  %3 = sub i64 %malloc_arr8275, %2
+  %3 = sub i64 %malloc_arr10283, %2
   %diff.check = icmp ult i64 %3, 32
-  br i1 %diff.check, label %arr_loop_body15.preheader, label %vector.ph
+  br i1 %diff.check, label %arr_loop_body19.preheader, label %vector.ph
 
 vector.ph:                                        ; preds = %vector.memcheck
   %n.vec = and i64 %slice_len, -4
@@ -71,91 +79,91 @@ vector.body:                                      ; preds = %vector.body, %vecto
   %4 = getelementptr i64, ptr %0, i64 %index
   %5 = getelementptr i64, ptr %4, i64 2
   %wide.load = load <2 x i64>, ptr %4, align 4
-  %wide.load276 = load <2 x i64>, ptr %5, align 4
-  %6 = getelementptr inbounds i64, ptr %data_ptr12, i64 %index
+  %wide.load284 = load <2 x i64>, ptr %5, align 4
+  %6 = getelementptr inbounds i64, ptr %data_ptr16, i64 %index
   %7 = getelementptr inbounds i64, ptr %6, i64 2
   store <2 x i64> %wide.load, ptr %6, align 4
-  store <2 x i64> %wide.load276, ptr %7, align 4
+  store <2 x i64> %wide.load284, ptr %7, align 4
   %index.next = add nuw i64 %index, 4
   %8 = icmp eq i64 %index.next, %n.vec
   br i1 %8, label %middle.block, label %vector.body, !llvm.loop !0
 
 middle.block:                                     ; preds = %vector.body
   %cmp.n = icmp eq i64 %slice_len, %n.vec
-  br i1 %cmp.n, label %arr_loop_end16, label %arr_loop_body15.preheader
+  br i1 %cmp.n, label %arr_loop_end20, label %arr_loop_body19.preheader
 
-arr_loop_body15.preheader:                        ; preds = %vector.memcheck, %arr_loop_body15.lr.ph, %middle.block
-  %storemerge237.ph = phi i64 [ 0, %vector.memcheck ], [ 0, %arr_loop_body15.lr.ph ], [ %n.vec, %middle.block ]
-  br label %arr_loop_body15
+arr_loop_body19.preheader:                        ; preds = %vector.memcheck, %arr_loop_body19.lr.ph, %middle.block
+  %storemerge245.ph = phi i64 [ 0, %vector.memcheck ], [ 0, %arr_loop_body19.lr.ph ], [ %n.vec, %middle.block ]
+  br label %arr_loop_body19
 
-arr_loop_body15:                                  ; preds = %arr_loop_body15.preheader, %arr_loop_body15
-  %storemerge237 = phi i64 [ %i_next22, %arr_loop_body15 ], [ %storemerge237.ph, %arr_loop_body15.preheader ]
-  %elem_ptr20 = getelementptr i64, ptr %0, i64 %storemerge237
-  %elem_i = load i64, ptr %elem_ptr20, align 4
-  %elem_ptr21 = getelementptr inbounds i64, ptr %data_ptr12, i64 %storemerge237
-  store i64 %elem_i, ptr %elem_ptr21, align 4
-  %i_next22 = add nuw i64 %storemerge237, 1
-  %loop_cont18 = icmp ult i64 %i_next22, %slice_len
-  br i1 %loop_cont18, label %arr_loop_body15, label %arr_loop_end16, !llvm.loop !3
+arr_loop_body19:                                  ; preds = %arr_loop_body19.preheader, %arr_loop_body19
+  %storemerge245 = phi i64 [ %i_next26, %arr_loop_body19 ], [ %storemerge245.ph, %arr_loop_body19.preheader ]
+  %elem_ptr24 = getelementptr i64, ptr %0, i64 %storemerge245
+  %elem_i = load i64, ptr %elem_ptr24, align 4
+  %elem_ptr25 = getelementptr inbounds i64, ptr %data_ptr16, i64 %storemerge245
+  store i64 %elem_i, ptr %elem_ptr25, align 4
+  %i_next26 = add nuw i64 %storemerge245, 1
+  %loop_cont22 = icmp ult i64 %i_next26, %slice_len
+  br i1 %loop_cont22, label %arr_loop_body19, label %arr_loop_end20, !llvm.loop !3
 
-arr_loop_end16:                                   ; preds = %arr_loop_body15, %middle.block, %entry
-  %arr_ptr_to_int23 = ptrtoint ptr %malloc_arr8 to i64
-  %arr_ptr_payload24 = and i64 %arr_ptr_to_int23, 281474976710655
-  %payload_to_arr_ptr28 = inttoptr i64 %arr_ptr_payload24 to ptr
-  %size_ptr29 = getelementptr inbounds i64, ptr %payload_to_arr_ptr28, i64 2
-  %arr_size30 = load i64, ptr %size_ptr29, align 4
-  %data_ptr31 = getelementptr inbounds i64, ptr %payload_to_arr_ptr28, i64 3
-  %loop_cont37239.not = icmp eq i64 %arr_size30, 0
-  br i1 %loop_cont37239.not, label %print_int.thread, label %arr_loop_body34.preheader
+arr_loop_end20:                                   ; preds = %arr_loop_body19, %middle.block, %entry
+  %arr_ptr_to_int27 = ptrtoint ptr %malloc_arr10 to i64
+  %arr_ptr_payload28 = and i64 %arr_ptr_to_int27, 281474976710655
+  %payload_to_arr_ptr32 = inttoptr i64 %arr_ptr_payload28 to ptr
+  %size_ptr33 = getelementptr inbounds i64, ptr %payload_to_arr_ptr32, i64 2
+  %arr_size34 = load i64, ptr %size_ptr33, align 4
+  %data_ptr35 = getelementptr inbounds i64, ptr %payload_to_arr_ptr32, i64 5
+  %loop_cont41247.not = icmp eq i64 %arr_size34, 0
+  br i1 %loop_cont41247.not, label %print_int.thread, label %arr_loop_body38.preheader
 
-arr_loop_body34.preheader:                        ; preds = %arr_loop_end16
-  %min.iters.check279 = icmp ult i64 %arr_size30, 4
-  br i1 %min.iters.check279, label %arr_loop_body34.preheader364, label %vector.ph280
+arr_loop_body38.preheader:                        ; preds = %arr_loop_end20
+  %min.iters.check287 = icmp ult i64 %arr_size34, 4
+  br i1 %min.iters.check287, label %arr_loop_body38.preheader372, label %vector.ph288
 
-vector.ph280:                                     ; preds = %arr_loop_body34.preheader
-  %n.vec282 = and i64 %arr_size30, -4
-  br label %vector.body285
+vector.ph288:                                     ; preds = %arr_loop_body38.preheader
+  %n.vec290 = and i64 %arr_size34, -4
+  br label %vector.body293
 
-vector.body285:                                   ; preds = %vector.body285, %vector.ph280
-  %index286 = phi i64 [ 0, %vector.ph280 ], [ %index.next290, %vector.body285 ]
-  %vec.phi = phi <2 x i64> [ zeroinitializer, %vector.ph280 ], [ %13, %vector.body285 ]
-  %vec.phi287 = phi <2 x i64> [ zeroinitializer, %vector.ph280 ], [ %14, %vector.body285 ]
-  %9 = getelementptr inbounds i64, ptr %data_ptr31, i64 %index286
+vector.body293:                                   ; preds = %vector.body293, %vector.ph288
+  %index294 = phi i64 [ 0, %vector.ph288 ], [ %index.next298, %vector.body293 ]
+  %vec.phi = phi <2 x i64> [ zeroinitializer, %vector.ph288 ], [ %13, %vector.body293 ]
+  %vec.phi295 = phi <2 x i64> [ zeroinitializer, %vector.ph288 ], [ %14, %vector.body293 ]
+  %9 = getelementptr inbounds i64, ptr %data_ptr35, i64 %index294
   %10 = getelementptr inbounds i64, ptr %9, i64 2
-  %wide.load288 = load <2 x i64>, ptr %9, align 4
-  %wide.load289 = load <2 x i64>, ptr %10, align 4
-  %11 = freeze <2 x i64> %wide.load288
-  %12 = freeze <2 x i64> %wide.load289
+  %wide.load296 = load <2 x i64>, ptr %9, align 4
+  %wide.load297 = load <2 x i64>, ptr %10, align 4
+  %11 = freeze <2 x i64> %wide.load296
+  %12 = freeze <2 x i64> %wide.load297
   %13 = add <2 x i64> %11, %vec.phi
-  %14 = add <2 x i64> %12, %vec.phi287
-  %index.next290 = add nuw i64 %index286, 4
-  %15 = icmp eq i64 %index.next290, %n.vec282
-  br i1 %15, label %middle.block277, label %vector.body285, !llvm.loop !4
+  %14 = add <2 x i64> %12, %vec.phi295
+  %index.next298 = add nuw i64 %index294, 4
+  %15 = icmp eq i64 %index.next298, %n.vec290
+  br i1 %15, label %middle.block285, label %vector.body293, !llvm.loop !4
 
-middle.block277:                                  ; preds = %vector.body285
+middle.block285:                                  ; preds = %vector.body293
   %bin.rdx = add <2 x i64> %14, %13
   %16 = tail call i64 @llvm.vector.reduce.add.v2i64(<2 x i64> %bin.rdx)
-  %cmp.n284 = icmp eq i64 %arr_size30, %n.vec282
-  br i1 %cmp.n284, label %print_int, label %arr_loop_body34.preheader364
+  %cmp.n292 = icmp eq i64 %arr_size34, %n.vec290
+  br i1 %cmp.n292, label %print_int, label %arr_loop_body38.preheader372
 
-arr_loop_body34.preheader364:                     ; preds = %arr_loop_body34.preheader, %middle.block277
-  %storemerge228241.ph = phi i64 [ 0, %arr_loop_body34.preheader ], [ %n.vec282, %middle.block277 ]
-  %acc_next238240.ph = phi i64 [ 0, %arr_loop_body34.preheader ], [ %16, %middle.block277 ]
-  br label %arr_loop_body34
+arr_loop_body38.preheader372:                     ; preds = %arr_loop_body38.preheader, %middle.block285
+  %storemerge236249.ph = phi i64 [ 0, %arr_loop_body38.preheader ], [ %n.vec290, %middle.block285 ]
+  %acc_next246248.ph = phi i64 [ 0, %arr_loop_body38.preheader ], [ %16, %middle.block285 ]
+  br label %arr_loop_body38
 
-arr_loop_body34:                                  ; preds = %arr_loop_body34.preheader364, %arr_loop_body34
-  %storemerge228241 = phi i64 [ %i_next41, %arr_loop_body34 ], [ %storemerge228241.ph, %arr_loop_body34.preheader364 ]
-  %acc_next238240 = phi i64 [ %acc_next, %arr_loop_body34 ], [ %acc_next238240.ph, %arr_loop_body34.preheader364 ]
-  %elem_ptr39 = getelementptr inbounds i64, ptr %data_ptr31, i64 %storemerge228241
-  %elem_i40 = load i64, ptr %elem_ptr39, align 4
-  %elem_i40.fr = freeze i64 %elem_i40
-  %acc_next = add i64 %elem_i40.fr, %acc_next238240
-  %i_next41 = add nuw i64 %storemerge228241, 1
-  %loop_cont37 = icmp ult i64 %i_next41, %arr_size30
-  br i1 %loop_cont37, label %arr_loop_body34, label %print_int, !llvm.loop !5
+arr_loop_body38:                                  ; preds = %arr_loop_body38.preheader372, %arr_loop_body38
+  %storemerge236249 = phi i64 [ %i_next45, %arr_loop_body38 ], [ %storemerge236249.ph, %arr_loop_body38.preheader372 ]
+  %acc_next246248 = phi i64 [ %acc_next, %arr_loop_body38 ], [ %acc_next246248.ph, %arr_loop_body38.preheader372 ]
+  %elem_ptr43 = getelementptr inbounds i64, ptr %data_ptr35, i64 %storemerge236249
+  %elem_i44 = load i64, ptr %elem_ptr43, align 4
+  %elem_i44.fr = freeze i64 %elem_i44
+  %acc_next = add i64 %elem_i44.fr, %acc_next246248
+  %i_next45 = add nuw i64 %storemerge236249, 1
+  %loop_cont41 = icmp ult i64 %i_next45, %arr_size34
+  br i1 %loop_cont41, label %arr_loop_body38, label %print_int, !llvm.loop !5
 
-print_int:                                        ; preds = %arr_loop_body34, %middle.block277
-  %acc_next.lcssa = phi i64 [ %16, %middle.block277 ], [ %acc_next, %arr_loop_body34 ]
+print_int:                                        ; preds = %arr_loop_body38, %middle.block285
+  %acc_next.lcssa = phi i64 [ %16, %middle.block285 ], [ %acc_next, %arr_loop_body38 ]
   %17 = and i64 %acc_next.lcssa, 281474976710655
   %is_negative.not = icmp ult i64 %17, 140737488355328
   %spec.select = select i1 %is_negative.not, i64 0, i64 -281474976710656
@@ -164,261 +172,269 @@ print_int:                                        ; preds = %arr_loop_body34, %m
   %20 = fptosi double %19 to i64
   br label %print_int.thread
 
-print_int.thread:                                 ; preds = %print_int, %arr_loop_end16
-  %signed_payload = phi i64 [ 0, %arr_loop_end16 ], [ %20, %print_int ]
+print_int.thread:                                 ; preds = %print_int, %arr_loop_end20
+  %signed_payload = phi i64 [ 0, %arr_loop_end20 ], [ %20, %print_int ]
   %printf_int = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.4, i64 %signed_payload)
-  %arr_size49 = load i64, ptr %size_ptr, align 4
-  %clamp_hi52 = tail call i64 @llvm.smin.i64(i64 %arr_size49, i64 0)
-  %clamp_hi56 = tail call i64 @llvm.smin.i64(i64 %arr_size49, i64 2)
-  %slice_len57 = sub i64 %clamp_hi56, %clamp_hi52
-  %arr_words58 = shl i64 %slice_len57, 3
-  %arr_bytes59 = add i64 %arr_words58, 24
-  %malloc_arr60 = tail call ptr @malloc(i64 %arr_bytes59)
-  store i64 1, ptr %malloc_arr60, align 4
-  %hdr_ptr62 = getelementptr inbounds i64, ptr %malloc_arr60, i64 1
-  store i64 1, ptr %hdr_ptr62, align 4
-  %hdr_ptr63 = getelementptr inbounds i64, ptr %malloc_arr60, i64 2
-  store i64 %slice_len57, ptr %hdr_ptr63, align 4
-  %data_ptr64 = getelementptr i64, ptr %malloc_arr60, i64 3
-  %loop_cont70242.not = icmp slt i64 %arr_size49, 1
-  br i1 %loop_cont70242.not, label %arr_loop_end68, label %arr_loop_body67.lr.ph
+  %arr_size53 = load i64, ptr %size_ptr, align 4
+  %clamp_hi56 = tail call i64 @llvm.smin.i64(i64 %arr_size53, i64 0)
+  %clamp_hi60 = tail call i64 @llvm.smin.i64(i64 %arr_size53, i64 2)
+  %slice_len61 = sub i64 %clamp_hi60, %clamp_hi56
+  %arr_words62 = shl i64 %slice_len61, 3
+  %arr_bytes63 = add i64 %arr_words62, 40
+  %malloc_arr64 = tail call ptr @malloc(i64 %arr_bytes63)
+  store i64 1, ptr %malloc_arr64, align 4
+  %hdr_ptr66 = getelementptr inbounds i64, ptr %malloc_arr64, i64 2
+  store i64 %slice_len61, ptr %hdr_ptr66, align 4
+  %hdr_ptr67 = getelementptr inbounds i64, ptr %malloc_arr64, i64 1
+  store i64 1, ptr %hdr_ptr67, align 4
+  %hdr_ptr68 = getelementptr inbounds i64, ptr %malloc_arr64, i64 3
+  store i64 %slice_len61, ptr %hdr_ptr68, align 4
+  %hdr_ptr69 = getelementptr inbounds i64, ptr %malloc_arr64, i64 4
+  store i64 1, ptr %hdr_ptr69, align 4
+  %data_ptr70 = getelementptr i64, ptr %malloc_arr64, i64 5
+  %loop_cont76250.not = icmp slt i64 %arr_size53, 1
+  br i1 %loop_cont76250.not, label %arr_loop_end74, label %arr_loop_body73.lr.ph
 
-arr_loop_body67.lr.ph:                            ; preds = %print_int.thread
-  %malloc_arr60292 = ptrtoint ptr %malloc_arr60 to i64
-  %21 = getelementptr i64, ptr %data_ptr5, i64 %clamp_hi52
-  %min.iters.check296 = icmp ult i64 %slice_len57, 10
-  %22 = sub i64 %malloc_arr60292, %arr_ptr_payload
-  %diff.check293 = icmp ult i64 %22, 32
-  %or.cond = or i1 %min.iters.check296, %diff.check293
-  br i1 %or.cond, label %arr_loop_body67.epil, label %vector.body302
+arr_loop_body73.lr.ph:                            ; preds = %print_int.thread
+  %malloc_arr64300 = ptrtoint ptr %malloc_arr64 to i64
+  %21 = getelementptr i64, ptr %data_ptr7, i64 %clamp_hi56
+  %min.iters.check304 = icmp ult i64 %slice_len61, 10
+  %22 = sub i64 %malloc_arr64300, %arr_ptr_payload
+  %diff.check301 = icmp ult i64 %22, 32
+  %or.cond = or i1 %min.iters.check304, %diff.check301
+  br i1 %or.cond, label %arr_loop_body73.epil, label %vector.body310
 
-vector.body302:                                   ; preds = %arr_loop_body67.lr.ph, %vector.body302
-  %index303 = phi i64 [ %index.next306, %vector.body302 ], [ 0, %arr_loop_body67.lr.ph ]
-  %23 = getelementptr i64, ptr %21, i64 %index303
+vector.body310:                                   ; preds = %arr_loop_body73.lr.ph, %vector.body310
+  %index311 = phi i64 [ %index.next314, %vector.body310 ], [ 0, %arr_loop_body73.lr.ph ]
+  %23 = getelementptr i64, ptr %21, i64 %index311
   %24 = getelementptr i64, ptr %23, i64 2
-  %wide.load304 = load <2 x i64>, ptr %23, align 4
-  %wide.load305 = load <2 x i64>, ptr %24, align 4
-  %25 = getelementptr inbounds i64, ptr %data_ptr64, i64 %index303
+  %wide.load312 = load <2 x i64>, ptr %23, align 4
+  %wide.load313 = load <2 x i64>, ptr %24, align 4
+  %25 = getelementptr inbounds i64, ptr %data_ptr70, i64 %index311
   %26 = getelementptr inbounds i64, ptr %25, i64 2
-  store <2 x i64> %wide.load304, ptr %25, align 4
-  store <2 x i64> %wide.load305, ptr %26, align 4
-  %index.next306 = add nuw i64 %index303, 4
-  br label %vector.body302, !llvm.loop !6
+  store <2 x i64> %wide.load312, ptr %25, align 4
+  store <2 x i64> %wide.load313, ptr %26, align 4
+  %index.next314 = add nuw i64 %index311, 4
+  br label %vector.body310, !llvm.loop !6
 
-arr_loop_body67.epil:                             ; preds = %arr_loop_body67.lr.ph, %arr_loop_body67.epil
-  %storemerge229243.epil = phi i64 [ %i_next76.epil, %arr_loop_body67.epil ], [ 0, %arr_loop_body67.lr.ph ]
-  %epil.iter = phi i64 [ %epil.iter.next, %arr_loop_body67.epil ], [ 0, %arr_loop_body67.lr.ph ]
-  %elem_ptr73.epil = getelementptr i64, ptr %21, i64 %storemerge229243.epil
-  %elem_i74.epil = load i64, ptr %elem_ptr73.epil, align 4
-  %elem_ptr75.epil = getelementptr inbounds i64, ptr %data_ptr64, i64 %storemerge229243.epil
-  store i64 %elem_i74.epil, ptr %elem_ptr75.epil, align 4
-  %i_next76.epil = add nuw i64 %storemerge229243.epil, 1
+arr_loop_body73.epil:                             ; preds = %arr_loop_body73.lr.ph, %arr_loop_body73.epil
+  %storemerge237251.epil = phi i64 [ %i_next82.epil, %arr_loop_body73.epil ], [ 0, %arr_loop_body73.lr.ph ]
+  %epil.iter = phi i64 [ %epil.iter.next, %arr_loop_body73.epil ], [ 0, %arr_loop_body73.lr.ph ]
+  %elem_ptr79.epil = getelementptr i64, ptr %21, i64 %storemerge237251.epil
+  %elem_i80.epil = load i64, ptr %elem_ptr79.epil, align 4
+  %elem_ptr81.epil = getelementptr inbounds i64, ptr %data_ptr70, i64 %storemerge237251.epil
+  store i64 %elem_i80.epil, ptr %elem_ptr81.epil, align 4
+  %i_next82.epil = add nuw i64 %storemerge237251.epil, 1
   %epil.iter.next = add i64 %epil.iter, 1
-  %epil.iter.cmp.not = icmp eq i64 %epil.iter.next, %clamp_hi56
-  br i1 %epil.iter.cmp.not, label %arr_loop_end68, label %arr_loop_body67.epil, !llvm.loop !7
+  %epil.iter.cmp.not = icmp eq i64 %epil.iter.next, %clamp_hi60
+  br i1 %epil.iter.cmp.not, label %arr_loop_end74, label %arr_loop_body73.epil, !llvm.loop !7
 
-arr_loop_end68:                                   ; preds = %arr_loop_body67.epil, %print_int.thread
-  %arr_ptr_to_int77 = ptrtoint ptr %malloc_arr60 to i64
-  %arr_ptr_payload78 = and i64 %arr_ptr_to_int77, 281474976710655
-  %payload_to_arr_ptr81 = inttoptr i64 %arr_ptr_payload78 to ptr
-  %size_ptr82 = getelementptr inbounds i64, ptr %payload_to_arr_ptr81, i64 2
-  %arr_size83 = load i64, ptr %size_ptr82, align 4
-  %data_ptr84 = getelementptr inbounds i64, ptr %payload_to_arr_ptr81, i64 3
-  %loop_cont91245.not = icmp eq i64 %arr_size83, 0
-  br i1 %loop_cont91245.not, label %print_int125.thread, label %arr_loop_body88.preheader
+arr_loop_end74:                                   ; preds = %arr_loop_body73.epil, %print_int.thread
+  %arr_ptr_to_int83 = ptrtoint ptr %malloc_arr64 to i64
+  %arr_ptr_payload84 = and i64 %arr_ptr_to_int83, 281474976710655
+  %payload_to_arr_ptr87 = inttoptr i64 %arr_ptr_payload84 to ptr
+  %size_ptr88 = getelementptr inbounds i64, ptr %payload_to_arr_ptr87, i64 2
+  %arr_size89 = load i64, ptr %size_ptr88, align 4
+  %data_ptr90 = getelementptr inbounds i64, ptr %payload_to_arr_ptr87, i64 5
+  %loop_cont97253.not = icmp eq i64 %arr_size89, 0
+  br i1 %loop_cont97253.not, label %print_int131.thread, label %arr_loop_body94.preheader
 
-arr_loop_body88.preheader:                        ; preds = %arr_loop_end68
-  %min.iters.check309 = icmp ult i64 %arr_size83, 4
-  br i1 %min.iters.check309, label %arr_loop_body88.preheader360, label %vector.ph310
+arr_loop_body94.preheader:                        ; preds = %arr_loop_end74
+  %min.iters.check317 = icmp ult i64 %arr_size89, 4
+  br i1 %min.iters.check317, label %arr_loop_body94.preheader368, label %vector.ph318
 
-vector.ph310:                                     ; preds = %arr_loop_body88.preheader
-  %n.vec312 = and i64 %arr_size83, -4
-  br label %vector.body315
+vector.ph318:                                     ; preds = %arr_loop_body94.preheader
+  %n.vec320 = and i64 %arr_size89, -4
+  br label %vector.body323
 
-vector.body315:                                   ; preds = %vector.body315, %vector.ph310
-  %index316 = phi i64 [ 0, %vector.ph310 ], [ %index.next321, %vector.body315 ]
-  %vec.phi317 = phi <2 x i64> [ zeroinitializer, %vector.ph310 ], [ %31, %vector.body315 ]
-  %vec.phi318 = phi <2 x i64> [ zeroinitializer, %vector.ph310 ], [ %32, %vector.body315 ]
-  %27 = getelementptr inbounds i64, ptr %data_ptr84, i64 %index316
+vector.body323:                                   ; preds = %vector.body323, %vector.ph318
+  %index324 = phi i64 [ 0, %vector.ph318 ], [ %index.next329, %vector.body323 ]
+  %vec.phi325 = phi <2 x i64> [ zeroinitializer, %vector.ph318 ], [ %31, %vector.body323 ]
+  %vec.phi326 = phi <2 x i64> [ zeroinitializer, %vector.ph318 ], [ %32, %vector.body323 ]
+  %27 = getelementptr inbounds i64, ptr %data_ptr90, i64 %index324
   %28 = getelementptr inbounds i64, ptr %27, i64 2
-  %wide.load319 = load <2 x i64>, ptr %27, align 4
-  %wide.load320 = load <2 x i64>, ptr %28, align 4
-  %29 = freeze <2 x i64> %wide.load319
-  %30 = freeze <2 x i64> %wide.load320
-  %31 = add <2 x i64> %29, %vec.phi317
-  %32 = add <2 x i64> %30, %vec.phi318
-  %index.next321 = add nuw i64 %index316, 4
-  %33 = icmp eq i64 %index.next321, %n.vec312
-  br i1 %33, label %middle.block307, label %vector.body315, !llvm.loop !9
+  %wide.load327 = load <2 x i64>, ptr %27, align 4
+  %wide.load328 = load <2 x i64>, ptr %28, align 4
+  %29 = freeze <2 x i64> %wide.load327
+  %30 = freeze <2 x i64> %wide.load328
+  %31 = add <2 x i64> %29, %vec.phi325
+  %32 = add <2 x i64> %30, %vec.phi326
+  %index.next329 = add nuw i64 %index324, 4
+  %33 = icmp eq i64 %index.next329, %n.vec320
+  br i1 %33, label %middle.block315, label %vector.body323, !llvm.loop !9
 
-middle.block307:                                  ; preds = %vector.body315
-  %bin.rdx322 = add <2 x i64> %32, %31
-  %34 = tail call i64 @llvm.vector.reduce.add.v2i64(<2 x i64> %bin.rdx322)
-  %cmp.n314 = icmp eq i64 %arr_size83, %n.vec312
-  br i1 %cmp.n314, label %print_int125, label %arr_loop_body88.preheader360
+middle.block315:                                  ; preds = %vector.body323
+  %bin.rdx330 = add <2 x i64> %32, %31
+  %34 = tail call i64 @llvm.vector.reduce.add.v2i64(<2 x i64> %bin.rdx330)
+  %cmp.n322 = icmp eq i64 %arr_size89, %n.vec320
+  br i1 %cmp.n322, label %print_int131, label %arr_loop_body94.preheader368
 
-arr_loop_body88.preheader360:                     ; preds = %arr_loop_body88.preheader, %middle.block307
-  %storemerge230247.ph = phi i64 [ 0, %arr_loop_body88.preheader ], [ %n.vec312, %middle.block307 ]
-  %acc_next96244246.ph = phi i64 [ 0, %arr_loop_body88.preheader ], [ %34, %middle.block307 ]
-  br label %arr_loop_body88
+arr_loop_body94.preheader368:                     ; preds = %arr_loop_body94.preheader, %middle.block315
+  %storemerge238255.ph = phi i64 [ 0, %arr_loop_body94.preheader ], [ %n.vec320, %middle.block315 ]
+  %acc_next102252254.ph = phi i64 [ 0, %arr_loop_body94.preheader ], [ %34, %middle.block315 ]
+  br label %arr_loop_body94
 
-arr_loop_body88:                                  ; preds = %arr_loop_body88.preheader360, %arr_loop_body88
-  %storemerge230247 = phi i64 [ %i_next97, %arr_loop_body88 ], [ %storemerge230247.ph, %arr_loop_body88.preheader360 ]
-  %acc_next96244246 = phi i64 [ %acc_next96, %arr_loop_body88 ], [ %acc_next96244246.ph, %arr_loop_body88.preheader360 ]
-  %elem_ptr94 = getelementptr inbounds i64, ptr %data_ptr84, i64 %storemerge230247
-  %elem_i95 = load i64, ptr %elem_ptr94, align 4
-  %elem_i95.fr = freeze i64 %elem_i95
-  %acc_next96 = add i64 %elem_i95.fr, %acc_next96244246
-  %i_next97 = add nuw i64 %storemerge230247, 1
-  %loop_cont91 = icmp ult i64 %i_next97, %arr_size83
-  br i1 %loop_cont91, label %arr_loop_body88, label %print_int125, !llvm.loop !10
+arr_loop_body94:                                  ; preds = %arr_loop_body94.preheader368, %arr_loop_body94
+  %storemerge238255 = phi i64 [ %i_next103, %arr_loop_body94 ], [ %storemerge238255.ph, %arr_loop_body94.preheader368 ]
+  %acc_next102252254 = phi i64 [ %acc_next102, %arr_loop_body94 ], [ %acc_next102252254.ph, %arr_loop_body94.preheader368 ]
+  %elem_ptr100 = getelementptr inbounds i64, ptr %data_ptr90, i64 %storemerge238255
+  %elem_i101 = load i64, ptr %elem_ptr100, align 4
+  %elem_i101.fr = freeze i64 %elem_i101
+  %acc_next102 = add i64 %elem_i101.fr, %acc_next102252254
+  %i_next103 = add nuw i64 %storemerge238255, 1
+  %loop_cont97 = icmp ult i64 %i_next103, %arr_size89
+  br i1 %loop_cont97, label %arr_loop_body94, label %print_int131, !llvm.loop !10
 
-print_int125:                                     ; preds = %arr_loop_body88, %middle.block307
-  %acc_next96.lcssa = phi i64 [ %34, %middle.block307 ], [ %acc_next96, %arr_loop_body88 ]
-  %35 = and i64 %acc_next96.lcssa, 281474976710655
-  %is_negative117.not = icmp ult i64 %35, 140737488355328
-  %spec.select273 = select i1 %is_negative117.not, i64 0, i64 -281474976710656
-  %36 = or disjoint i64 %spec.select273, %35
+print_int131:                                     ; preds = %arr_loop_body94, %middle.block315
+  %acc_next102.lcssa = phi i64 [ %34, %middle.block315 ], [ %acc_next102, %arr_loop_body94 ]
+  %35 = and i64 %acc_next102.lcssa, 281474976710655
+  %is_negative123.not = icmp ult i64 %35, 140737488355328
+  %spec.select281 = select i1 %is_negative123.not, i64 0, i64 -281474976710656
+  %36 = or disjoint i64 %spec.select281, %35
   %37 = sitofp i64 %36 to double
   %38 = fptosi double %37 to i64
-  br label %print_int125.thread
+  br label %print_int131.thread
 
-print_int125.thread:                              ; preds = %print_int125, %arr_loop_end68
-  %signed_payload119 = phi i64 [ 0, %arr_loop_end68 ], [ %38, %print_int125 ]
-  %printf_int130 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.4, i64 %signed_payload119)
-  %arr_size139 = load i64, ptr %size_ptr, align 4
-  %clamp_hi142 = tail call i64 @llvm.smin.i64(i64 %arr_size139, i64 3)
-  %slice_len147 = sub i64 %arr_size139, %clamp_hi142
-  %arr_words148 = shl i64 %slice_len147, 3
-  %arr_bytes149 = add i64 %arr_words148, 24
-  %malloc_arr150 = tail call ptr @malloc(i64 %arr_bytes149)
-  %malloc_arr150325 = ptrtoint ptr %malloc_arr150 to i64
-  store i64 1, ptr %malloc_arr150, align 4
-  %hdr_ptr152 = getelementptr inbounds i64, ptr %malloc_arr150, i64 1
-  store i64 1, ptr %hdr_ptr152, align 4
-  %hdr_ptr153 = getelementptr inbounds i64, ptr %malloc_arr150, i64 2
-  store i64 %slice_len147, ptr %hdr_ptr153, align 4
-  %data_ptr154 = getelementptr i64, ptr %malloc_arr150, i64 3
-  %loop_cont160249.not = icmp slt i64 %arr_size139, 4
-  br i1 %loop_cont160249.not, label %arr_loop_end158, label %arr_loop_body157.lr.ph
+print_int131.thread:                              ; preds = %print_int131, %arr_loop_end74
+  %signed_payload125 = phi i64 [ 0, %arr_loop_end74 ], [ %38, %print_int131 ]
+  %printf_int136 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.4, i64 %signed_payload125)
+  %arr_size145 = load i64, ptr %size_ptr, align 4
+  %clamp_hi148 = tail call i64 @llvm.smin.i64(i64 %arr_size145, i64 3)
+  %slice_len153 = sub i64 %arr_size145, %clamp_hi148
+  %arr_words154 = shl i64 %slice_len153, 3
+  %arr_bytes155 = add i64 %arr_words154, 40
+  %malloc_arr156 = tail call ptr @malloc(i64 %arr_bytes155)
+  %malloc_arr156333 = ptrtoint ptr %malloc_arr156 to i64
+  store i64 1, ptr %malloc_arr156, align 4
+  %hdr_ptr158 = getelementptr inbounds i64, ptr %malloc_arr156, i64 2
+  store i64 %slice_len153, ptr %hdr_ptr158, align 4
+  %hdr_ptr159 = getelementptr inbounds i64, ptr %malloc_arr156, i64 1
+  store i64 1, ptr %hdr_ptr159, align 4
+  %hdr_ptr160 = getelementptr inbounds i64, ptr %malloc_arr156, i64 3
+  store i64 %slice_len153, ptr %hdr_ptr160, align 4
+  %hdr_ptr161 = getelementptr inbounds i64, ptr %malloc_arr156, i64 4
+  store i64 1, ptr %hdr_ptr161, align 4
+  %data_ptr162 = getelementptr i64, ptr %malloc_arr156, i64 5
+  %loop_cont168257.not = icmp slt i64 %arr_size145, 4
+  br i1 %loop_cont168257.not, label %arr_loop_end166, label %arr_loop_body165.lr.ph
 
-arr_loop_body157.lr.ph:                           ; preds = %print_int125.thread
-  %39 = getelementptr i64, ptr %data_ptr5, i64 %clamp_hi142
-  %min.iters.check329 = icmp ult i64 %slice_len147, 10
-  br i1 %min.iters.check329, label %arr_loop_body157.preheader, label %vector.memcheck324
+arr_loop_body165.lr.ph:                           ; preds = %print_int131.thread
+  %39 = getelementptr i64, ptr %data_ptr7, i64 %clamp_hi148
+  %min.iters.check337 = icmp ult i64 %slice_len153, 10
+  br i1 %min.iters.check337, label %arr_loop_body165.preheader, label %vector.memcheck332
 
-vector.memcheck324:                               ; preds = %arr_loop_body157.lr.ph
-  %40 = shl nuw nsw i64 %clamp_hi142, 3
+vector.memcheck332:                               ; preds = %arr_loop_body165.lr.ph
+  %40 = shl nuw nsw i64 %clamp_hi148, 3
   %41 = add nuw nsw i64 %arr_ptr_payload, %40
-  %42 = sub i64 %malloc_arr150325, %41
-  %diff.check326 = icmp ult i64 %42, 32
-  br i1 %diff.check326, label %arr_loop_body157.preheader, label %vector.ph330
+  %42 = sub i64 %malloc_arr156333, %41
+  %diff.check334 = icmp ult i64 %42, 32
+  br i1 %diff.check334, label %arr_loop_body165.preheader, label %vector.ph338
 
-vector.ph330:                                     ; preds = %vector.memcheck324
-  %n.vec332 = and i64 %slice_len147, -4
-  br label %vector.body335
+vector.ph338:                                     ; preds = %vector.memcheck332
+  %n.vec340 = and i64 %slice_len153, -4
+  br label %vector.body343
 
-vector.body335:                                   ; preds = %vector.body335, %vector.ph330
-  %index336 = phi i64 [ 0, %vector.ph330 ], [ %index.next339, %vector.body335 ]
-  %43 = getelementptr i64, ptr %39, i64 %index336
+vector.body343:                                   ; preds = %vector.body343, %vector.ph338
+  %index344 = phi i64 [ 0, %vector.ph338 ], [ %index.next347, %vector.body343 ]
+  %43 = getelementptr i64, ptr %39, i64 %index344
   %44 = getelementptr i64, ptr %43, i64 2
-  %wide.load337 = load <2 x i64>, ptr %43, align 4
-  %wide.load338 = load <2 x i64>, ptr %44, align 4
-  %45 = getelementptr inbounds i64, ptr %data_ptr154, i64 %index336
+  %wide.load345 = load <2 x i64>, ptr %43, align 4
+  %wide.load346 = load <2 x i64>, ptr %44, align 4
+  %45 = getelementptr inbounds i64, ptr %data_ptr162, i64 %index344
   %46 = getelementptr inbounds i64, ptr %45, i64 2
-  store <2 x i64> %wide.load337, ptr %45, align 4
-  store <2 x i64> %wide.load338, ptr %46, align 4
-  %index.next339 = add nuw i64 %index336, 4
-  %47 = icmp eq i64 %index.next339, %n.vec332
-  br i1 %47, label %middle.block327, label %vector.body335, !llvm.loop !11
+  store <2 x i64> %wide.load345, ptr %45, align 4
+  store <2 x i64> %wide.load346, ptr %46, align 4
+  %index.next347 = add nuw i64 %index344, 4
+  %47 = icmp eq i64 %index.next347, %n.vec340
+  br i1 %47, label %middle.block335, label %vector.body343, !llvm.loop !11
 
-middle.block327:                                  ; preds = %vector.body335
-  %cmp.n334 = icmp eq i64 %slice_len147, %n.vec332
-  br i1 %cmp.n334, label %arr_loop_end158, label %arr_loop_body157.preheader
+middle.block335:                                  ; preds = %vector.body343
+  %cmp.n342 = icmp eq i64 %slice_len153, %n.vec340
+  br i1 %cmp.n342, label %arr_loop_end166, label %arr_loop_body165.preheader
 
-arr_loop_body157.preheader:                       ; preds = %vector.memcheck324, %arr_loop_body157.lr.ph, %middle.block327
-  %storemerge232250.ph = phi i64 [ 0, %vector.memcheck324 ], [ 0, %arr_loop_body157.lr.ph ], [ %n.vec332, %middle.block327 ]
-  br label %arr_loop_body157
+arr_loop_body165.preheader:                       ; preds = %vector.memcheck332, %arr_loop_body165.lr.ph, %middle.block335
+  %storemerge240258.ph = phi i64 [ 0, %vector.memcheck332 ], [ 0, %arr_loop_body165.lr.ph ], [ %n.vec340, %middle.block335 ]
+  br label %arr_loop_body165
 
-arr_loop_body157:                                 ; preds = %arr_loop_body157.preheader, %arr_loop_body157
-  %storemerge232250 = phi i64 [ %i_next166, %arr_loop_body157 ], [ %storemerge232250.ph, %arr_loop_body157.preheader ]
-  %elem_ptr163 = getelementptr i64, ptr %39, i64 %storemerge232250
-  %elem_i164 = load i64, ptr %elem_ptr163, align 4
-  %elem_ptr165 = getelementptr inbounds i64, ptr %data_ptr154, i64 %storemerge232250
-  store i64 %elem_i164, ptr %elem_ptr165, align 4
-  %i_next166 = add nuw i64 %storemerge232250, 1
-  %loop_cont160 = icmp ult i64 %i_next166, %slice_len147
-  br i1 %loop_cont160, label %arr_loop_body157, label %arr_loop_end158, !llvm.loop !12
+arr_loop_body165:                                 ; preds = %arr_loop_body165.preheader, %arr_loop_body165
+  %storemerge240258 = phi i64 [ %i_next174, %arr_loop_body165 ], [ %storemerge240258.ph, %arr_loop_body165.preheader ]
+  %elem_ptr171 = getelementptr i64, ptr %39, i64 %storemerge240258
+  %elem_i172 = load i64, ptr %elem_ptr171, align 4
+  %elem_ptr173 = getelementptr inbounds i64, ptr %data_ptr162, i64 %storemerge240258
+  store i64 %elem_i172, ptr %elem_ptr173, align 4
+  %i_next174 = add nuw i64 %storemerge240258, 1
+  %loop_cont168 = icmp ult i64 %i_next174, %slice_len153
+  br i1 %loop_cont168, label %arr_loop_body165, label %arr_loop_end166, !llvm.loop !12
 
-arr_loop_end158:                                  ; preds = %arr_loop_body157, %middle.block327, %print_int125.thread
-  %arr_ptr_to_int167 = ptrtoint ptr %malloc_arr150 to i64
-  %arr_ptr_payload168 = and i64 %arr_ptr_to_int167, 281474976710655
-  %payload_to_arr_ptr171 = inttoptr i64 %arr_ptr_payload168 to ptr
-  %size_ptr172 = getelementptr inbounds i64, ptr %payload_to_arr_ptr171, i64 2
-  %arr_size173 = load i64, ptr %size_ptr172, align 4
-  %data_ptr174 = getelementptr inbounds i64, ptr %payload_to_arr_ptr171, i64 3
-  %loop_cont181252.not = icmp eq i64 %arr_size173, 0
-  br i1 %loop_cont181252.not, label %print_int215.thread, label %arr_loop_body178.preheader
+arr_loop_end166:                                  ; preds = %arr_loop_body165, %middle.block335, %print_int131.thread
+  %arr_ptr_to_int175 = ptrtoint ptr %malloc_arr156 to i64
+  %arr_ptr_payload176 = and i64 %arr_ptr_to_int175, 281474976710655
+  %payload_to_arr_ptr179 = inttoptr i64 %arr_ptr_payload176 to ptr
+  %size_ptr180 = getelementptr inbounds i64, ptr %payload_to_arr_ptr179, i64 2
+  %arr_size181 = load i64, ptr %size_ptr180, align 4
+  %data_ptr182 = getelementptr inbounds i64, ptr %payload_to_arr_ptr179, i64 5
+  %loop_cont189260.not = icmp eq i64 %arr_size181, 0
+  br i1 %loop_cont189260.not, label %print_int223.thread, label %arr_loop_body186.preheader
 
-arr_loop_body178.preheader:                       ; preds = %arr_loop_end158
-  %min.iters.check342 = icmp ult i64 %arr_size173, 4
-  br i1 %min.iters.check342, label %arr_loop_body178.preheader357, label %vector.ph343
+arr_loop_body186.preheader:                       ; preds = %arr_loop_end166
+  %min.iters.check350 = icmp ult i64 %arr_size181, 4
+  br i1 %min.iters.check350, label %arr_loop_body186.preheader365, label %vector.ph351
 
-vector.ph343:                                     ; preds = %arr_loop_body178.preheader
-  %n.vec345 = and i64 %arr_size173, -4
-  br label %vector.body348
+vector.ph351:                                     ; preds = %arr_loop_body186.preheader
+  %n.vec353 = and i64 %arr_size181, -4
+  br label %vector.body356
 
-vector.body348:                                   ; preds = %vector.body348, %vector.ph343
-  %index349 = phi i64 [ 0, %vector.ph343 ], [ %index.next354, %vector.body348 ]
-  %vec.phi350 = phi <2 x i64> [ zeroinitializer, %vector.ph343 ], [ %52, %vector.body348 ]
-  %vec.phi351 = phi <2 x i64> [ zeroinitializer, %vector.ph343 ], [ %53, %vector.body348 ]
-  %48 = getelementptr inbounds i64, ptr %data_ptr174, i64 %index349
+vector.body356:                                   ; preds = %vector.body356, %vector.ph351
+  %index357 = phi i64 [ 0, %vector.ph351 ], [ %index.next362, %vector.body356 ]
+  %vec.phi358 = phi <2 x i64> [ zeroinitializer, %vector.ph351 ], [ %52, %vector.body356 ]
+  %vec.phi359 = phi <2 x i64> [ zeroinitializer, %vector.ph351 ], [ %53, %vector.body356 ]
+  %48 = getelementptr inbounds i64, ptr %data_ptr182, i64 %index357
   %49 = getelementptr inbounds i64, ptr %48, i64 2
-  %wide.load352 = load <2 x i64>, ptr %48, align 4
-  %wide.load353 = load <2 x i64>, ptr %49, align 4
-  %50 = freeze <2 x i64> %wide.load352
-  %51 = freeze <2 x i64> %wide.load353
-  %52 = add <2 x i64> %50, %vec.phi350
-  %53 = add <2 x i64> %51, %vec.phi351
-  %index.next354 = add nuw i64 %index349, 4
-  %54 = icmp eq i64 %index.next354, %n.vec345
-  br i1 %54, label %middle.block340, label %vector.body348, !llvm.loop !13
+  %wide.load360 = load <2 x i64>, ptr %48, align 4
+  %wide.load361 = load <2 x i64>, ptr %49, align 4
+  %50 = freeze <2 x i64> %wide.load360
+  %51 = freeze <2 x i64> %wide.load361
+  %52 = add <2 x i64> %50, %vec.phi358
+  %53 = add <2 x i64> %51, %vec.phi359
+  %index.next362 = add nuw i64 %index357, 4
+  %54 = icmp eq i64 %index.next362, %n.vec353
+  br i1 %54, label %middle.block348, label %vector.body356, !llvm.loop !13
 
-middle.block340:                                  ; preds = %vector.body348
-  %bin.rdx355 = add <2 x i64> %53, %52
-  %55 = tail call i64 @llvm.vector.reduce.add.v2i64(<2 x i64> %bin.rdx355)
-  %cmp.n347 = icmp eq i64 %arr_size173, %n.vec345
-  br i1 %cmp.n347, label %print_int215, label %arr_loop_body178.preheader357
+middle.block348:                                  ; preds = %vector.body356
+  %bin.rdx363 = add <2 x i64> %53, %52
+  %55 = tail call i64 @llvm.vector.reduce.add.v2i64(<2 x i64> %bin.rdx363)
+  %cmp.n355 = icmp eq i64 %arr_size181, %n.vec353
+  br i1 %cmp.n355, label %print_int223, label %arr_loop_body186.preheader365
 
-arr_loop_body178.preheader357:                    ; preds = %arr_loop_body178.preheader, %middle.block340
-  %storemerge233254.ph = phi i64 [ 0, %arr_loop_body178.preheader ], [ %n.vec345, %middle.block340 ]
-  %acc_next186251253.ph = phi i64 [ 0, %arr_loop_body178.preheader ], [ %55, %middle.block340 ]
-  br label %arr_loop_body178
+arr_loop_body186.preheader365:                    ; preds = %arr_loop_body186.preheader, %middle.block348
+  %storemerge241262.ph = phi i64 [ 0, %arr_loop_body186.preheader ], [ %n.vec353, %middle.block348 ]
+  %acc_next194259261.ph = phi i64 [ 0, %arr_loop_body186.preheader ], [ %55, %middle.block348 ]
+  br label %arr_loop_body186
 
-arr_loop_body178:                                 ; preds = %arr_loop_body178.preheader357, %arr_loop_body178
-  %storemerge233254 = phi i64 [ %i_next187, %arr_loop_body178 ], [ %storemerge233254.ph, %arr_loop_body178.preheader357 ]
-  %acc_next186251253 = phi i64 [ %acc_next186, %arr_loop_body178 ], [ %acc_next186251253.ph, %arr_loop_body178.preheader357 ]
-  %elem_ptr184 = getelementptr inbounds i64, ptr %data_ptr174, i64 %storemerge233254
-  %elem_i185 = load i64, ptr %elem_ptr184, align 4
-  %elem_i185.fr = freeze i64 %elem_i185
-  %acc_next186 = add i64 %elem_i185.fr, %acc_next186251253
-  %i_next187 = add nuw i64 %storemerge233254, 1
-  %loop_cont181 = icmp ult i64 %i_next187, %arr_size173
-  br i1 %loop_cont181, label %arr_loop_body178, label %print_int215, !llvm.loop !14
+arr_loop_body186:                                 ; preds = %arr_loop_body186.preheader365, %arr_loop_body186
+  %storemerge241262 = phi i64 [ %i_next195, %arr_loop_body186 ], [ %storemerge241262.ph, %arr_loop_body186.preheader365 ]
+  %acc_next194259261 = phi i64 [ %acc_next194, %arr_loop_body186 ], [ %acc_next194259261.ph, %arr_loop_body186.preheader365 ]
+  %elem_ptr192 = getelementptr inbounds i64, ptr %data_ptr182, i64 %storemerge241262
+  %elem_i193 = load i64, ptr %elem_ptr192, align 4
+  %elem_i193.fr = freeze i64 %elem_i193
+  %acc_next194 = add i64 %elem_i193.fr, %acc_next194259261
+  %i_next195 = add nuw i64 %storemerge241262, 1
+  %loop_cont189 = icmp ult i64 %i_next195, %arr_size181
+  br i1 %loop_cont189, label %arr_loop_body186, label %print_int223, !llvm.loop !14
 
-print_int215:                                     ; preds = %arr_loop_body178, %middle.block340
-  %acc_next186.lcssa = phi i64 [ %55, %middle.block340 ], [ %acc_next186, %arr_loop_body178 ]
-  %56 = and i64 %acc_next186.lcssa, 281474976710655
-  %is_negative207.not = icmp ult i64 %56, 140737488355328
-  %spec.select274 = select i1 %is_negative207.not, i64 0, i64 -281474976710656
-  %57 = or disjoint i64 %spec.select274, %56
+print_int223:                                     ; preds = %arr_loop_body186, %middle.block348
+  %acc_next194.lcssa = phi i64 [ %55, %middle.block348 ], [ %acc_next194, %arr_loop_body186 ]
+  %56 = and i64 %acc_next194.lcssa, 281474976710655
+  %is_negative215.not = icmp ult i64 %56, 140737488355328
+  %spec.select282 = select i1 %is_negative215.not, i64 0, i64 -281474976710656
+  %57 = or disjoint i64 %spec.select282, %56
   %58 = sitofp i64 %57 to double
   %59 = fptosi double %58 to i64
-  br label %print_int215.thread
+  br label %print_int223.thread
 
-print_int215.thread:                              ; preds = %print_int215, %arr_loop_end158
-  %signed_payload209 = phi i64 [ 0, %arr_loop_end158 ], [ %59, %print_int215 ]
-  %printf_int220 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.4, i64 %signed_payload209)
+print_int223.thread:                              ; preds = %print_int223, %arr_loop_end166
+  %signed_payload217 = phi i64 [ 0, %arr_loop_end166 ], [ %59, %print_int223 ]
+  %printf_int228 = tail call i32 (ptr, ...) @printf(ptr nonnull dereferenceable(1) @int_format_string.4, i64 %signed_payload217)
   ret i32 0
 }
 

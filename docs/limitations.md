@@ -413,13 +413,16 @@ print(np.dot(a, a), a.prod())    # dot product & product reduction
 def scale(v): return v * 2       # arrays through user functions (params & returns)
 print(scale(a).sum())
 
-# ✅ Also supported: int64 arrays with NumPy dtype promotion
+# ✅ Also supported: int64 arrays with dtype promotion; 2-D matrices
 i = np.arange(4)                 # int64: [0 1 2 3]
 print(i + 1, i / 2)              # int stays int; `/` promotes to float
+m = np.array([[1.0, 2.0], [3.0, 4.0]])
+print(m[0, 1], m.T, np.matmul(m, m))
 
 # ❌ Not supported yet
-m = np.array([[1.0, 2.0]])       # multi-dimensional arrays
-a[0:2] = b                       # slice assignment
+t = np.array([[[1.0]]])          # more than 2 dimensions
+m[0, 1] = 9.0                    # 2-D item / slice assignment
+s = m.shape                      # shape / reshape (need tuples)
 x = np.array([1], dtype=...)     # explicit dtype= / dtypes beyond int64/float64
 ```
 

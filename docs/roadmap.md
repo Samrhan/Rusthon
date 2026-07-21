@@ -137,11 +137,23 @@ at compile time (including through functions), so int and float arrays get
 separate fast code with NumPy-style promotion. `ArrayDtype::Unknown` (a value
 that is int on one path, float on another) is a compile-time error.
 
+**Phase 6 — 2-D arrays (matrices)** ✅ Done
+```python
+import numpy as np
+m = np.array([[1.0, 2.0], [3.0, 4.0]])
+print(m[0, 1], m.T)          # indexing and transpose
+print(m + m, np.matmul(m, m))# element-wise and matrix product
+```
+A fixed 5-word header `[dtype, ndim, size, rows, cols]` carries the shape.
+2-D construction from nested literals, `a[i, j]`, `.T`, `np.matmul`, and
+element-wise ops/reductions (which run over the flat buffer) all work for
+int and float matrices.
+
 **Next phases** 🔮 Planned
-- Boolean/fancy indexing, negative indices, slice assignment (`a[i:j] = ...`).
-- Multi-dimensional arrays (`ndim`/shape/strides), `reshape`, `.T`, `@` matmul.
-- More ufuncs/reductions (`np.tanh`, `np.power`, `np.std`, `np.cumsum`, …).
-- An explicit `dtype=` argument and more dtypes (`bool`, `float32`).
+- Tuples — the prerequisite for `.shape`, `reshape`, `np.zeros((m, n))`.
+- Row indexing of a matrix (`m[i]` → 1-D), 2-D item/slice assignment.
+- >2 dimensions (variable-length shape), `@` matmul operator.
+- More ufuncs/reductions and dtypes (`np.std`, `bool`, `float32`, `dtype=`).
 
 ### Data Structures
 

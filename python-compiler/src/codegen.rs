@@ -584,6 +584,9 @@ impl<'ctx> Compiler<'ctx> {
             IRExpr::UnaryOp { op, operand } => expression::compile_unary_op(self, op, operand),
             IRExpr::List(elements) => expression::compile_list(self, elements),
             IRExpr::Index { list, index } => expression::compile_index(self, list, index),
+            IRExpr::IndexND { array, indices } => {
+                expression::compile_index_nd(self, array, indices)
+            }
             IRExpr::Slice {
                 value,
                 lower,
@@ -713,6 +716,7 @@ impl<'ctx> Compiler<'ctx> {
                 arrayness::numpy_call_dtype(func, args, |a| self.expr_array_dtype(a))
             }
             IRExpr::Slice { value, .. } => self.expr_array_dtype(value),
+            IRExpr::Attribute { value, attr } if attr == "T" => self.expr_array_dtype(value),
             IRExpr::BinaryOp { op, left, right }
                 if matches!(
                     op,

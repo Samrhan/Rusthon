@@ -66,7 +66,7 @@ Python Source → Parser → AST → Lowering → IR → CodeGen → LLVM IR →
   - `compiler/generators/expression.rs` — expression compilation
   - `compiler/generators/statement.rs` — statement compilation
   - `compiler/generators/module.rs` — module/method/attribute dispatch (e.g. `np.array`, `arr.sum()`)
-  - `compiler/generators/ndarray.rs` — NumPy `ndarray` codegen (unboxed int64/float64 buffers, dtype-aware element-wise loops)
+  - `compiler/generators/ndarray.rs` — NumPy `ndarray` codegen (unboxed int64/float64 buffers, 1-D & 2-D, dtype-aware element-wise loops, matmul/transpose)
 
 #### 4. **Optimization** (LLVM 18 new pass manager)
 - Pipeline: `default<O2>`
@@ -176,13 +176,13 @@ Value:   3         10          20          30
 | `integration.rs` | End-to-end scenarios | 4 |
 | `lists.rs` | List operations | 6 |
 | `minimal_test.rs` | Smoke test | 1 |
-| `numpy.rs` | NumPy subset (arrays, dtypes, module system) | 30 |
+| `numpy.rs` | NumPy subset (1-D/2-D arrays, dtypes, module system) | 32 |
 | `precedence.rs` | Operator precedence | 18 |
 | `strings.rs` | String operations | 28 |
 | `unary.rs` | Unary operators | 15 |
 | `variables.rs` | Variable assignment | 3 |
 
-**Total**: 214 tests
+**Total**: 216 tests
 
 ### Documentation (`docs/`)
 
