@@ -241,6 +241,37 @@ print(r.sum())
     assert!(info.call_returns_array("grow"));
 }
 
+#[test]
+fn test_ufunc_tables_agree() {
+    // Every ufunc the analysis knows about must have a codegen intrinsic, so the
+    // two lists (arrayness::NUMPY_UFUNCS and ndarray::ufunc_intrinsic) can't drift.
+    for name in compiler::arrayness::NUMPY_UFUNCS {
+        assert!(
+            compiler::generators::ndarray::ufunc_intrinsic(name).is_some(),
+            "ufunc '{name}' has no intrinsic mapping"
+        );
+    }
+}
+
+#[test]
+fn test_numpy_call_arrayness() {
+    // Constructors always yield arrays; a ufunc mirrors its argument;
+    // reductions and dot yield scalars.
+    use compiler::arrayness::numpy_call_returns_array as returns_array;
+    let arg = [ast::IRExpr::Float(1.0)];
+    assert!(returns_array("zeros", &[], |_| false), "zeros -> array");
+    assert!(
+        returns_array("sqrt", &arg, |_| true),
+        "sqrt(array) -> array"
+    );
+    assert!(
+        !returns_array("sqrt", &arg, |_| false),
+        "sqrt(scalar) -> scalar"
+    );
+    assert!(!returns_array("sum", &arg, |_| true), "sum -> scalar");
+    assert!(!returns_array("dot", &arg, |_| true), "dot -> scalar");
+}
+
 // ---------------------------------------------------------------------------
 // Codegen snapshots
 // ---------------------------------------------------------------------------
@@ -371,9 +402,55 @@ print(np.min(a))
     insta::assert_snapshot!(compile(source));
 }
 
+#[test]
+fn test_array_ufuncs_and_linalg() {
+    let source = r#"
+import numpy as np
+a = np.array([1.0, 4.0, 9.0, 16.0])
+print(np.sqrt(a))
+b = np.array([1.0, 2.0, 3.0])
+c = np.array([4.0, 5.0, 6.0])
+print(np.dot(b, c))
+print(b.prod())
+print(np.exp(np.zeros(3)))
+"#;
+    insta::assert_snapshot!(compile(source));
+}
+
 // ---------------------------------------------------------------------------
 // Behavioural invariants
 // ---------------------------------------------------------------------------
+
+#[test]
+fn test_ufunc_lowers_to_llvm_intrinsic() {
+    let source = r#"
+import numpy as np
+a = np.array([1.0, 4.0, 9.0, 16.0, 25.0, 36.0, 49.0, 64.0])
+print(np.sqrt(a))
+"#;
+    let ir = compile(source);
+    assert!(
+        ir.contains("llvm.sqrt"),
+        "np.sqrt should lower to the LLVM sqrt intrinsic:\n{ir}"
+    );
+}
+
+#[test]
+fn test_ufunc_applies_to_scalars() {
+    // A ufunc of a scalar (here `sqrt` of a reduction) is a scalar operation,
+    // not an array one — it must compile without array machinery for the arg.
+    let source = r#"
+import numpy as np
+def rms(v):
+    return np.sqrt((v * v).mean())
+print(rms(np.array([3.0, 4.0])))
+"#;
+    let ir = compile(source);
+    assert!(
+        ir.contains("llvm.sqrt"),
+        "scalar sqrt should still use the intrinsic"
+    );
+}
 
 #[test]
 fn test_slicing_non_array_is_rejected() {

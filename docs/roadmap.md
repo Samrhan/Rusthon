@@ -113,11 +113,23 @@ A whole-program "arrayness" analysis (monotonic fixpoint over
 parameters and return values — transitively and through recursion — with no
 annotations. Scalar code stays untouched (pay-as-you-go).
 
+**Phase 4 — element-wise math & linear algebra** ✅ Done
+```python
+import numpy as np
+a = np.array([1.0, 4.0, 9.0, 16.0])
+print(np.sqrt(a))                 # vectorized ufunc (llvm.sqrt.v2f64)
+print(np.dot(a, a))               # 1-D dot product
+print(a.prod())                   # product reduction
+```
+Unary ufuncs (`sqrt`/`abs`/`exp`/`log`/`sin`/`cos`/`floor`/`ceil`) lower to
+LLVM intrinsics and vectorize; they mirror their argument (array→array,
+scalar→scalar). Plus `np.dot` and `prod`.
+
 **Next phases** 🔮 Planned
 - Additional dtypes (`int64`) tracked in the array header.
 - Boolean/fancy indexing, negative indices, slice assignment (`a[i:j] = ...`).
-- Multi-dimensional arrays (`ndim`/shape/strides), `reshape`, `.T`.
-- Linear algebra (`np.dot`, `@`), more ufuncs (`np.sqrt`, …).
+- Multi-dimensional arrays (`ndim`/shape/strides), `reshape`, `.T`, `@` matmul.
+- More ufuncs/reductions (`np.tanh`, `np.power`, `np.std`, `np.cumsum`, …).
 
 ### Data Structures
 

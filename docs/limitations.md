@@ -407,8 +407,10 @@ a[0] = 9.0                       # item assignment
 s = a[0:2]                       # copy-slicing
 print(a)                         # [9.000000 2.000000 3.000000]
 
-# ✅ Also supported: arrays through user functions (params & returns)
-def scale(v): return v * 2
+# ✅ Also supported
+print(np.sqrt(a), np.exp(a))     # element-wise ufuncs (vectorized)
+print(np.dot(a, a), a.prod())    # dot product & product reduction
+def scale(v): return v * 2       # arrays through user functions (params & returns)
 print(scale(a).sum())
 
 # ❌ Not supported yet

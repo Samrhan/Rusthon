@@ -28,7 +28,8 @@
 
 use crate::ast::BinOp;
 use crate::codegen::{CodeGenError, Compiler};
-use inkwell::values::{FloatValue, IntValue, PointerValue};
+use inkwell::intrinsics::Intrinsic;
+use inkwell::values::{FloatValue, FunctionValue, IntValue, PointerValue};
 
 /// Element dtype tag for `float64` arrays.
 pub const DTYPE_F64: i64 = 0;
@@ -826,6 +827,185 @@ pub fn print_array<'ctx>(
             .build_call(printf, &[nl.into()], "print_nl")
             .unwrap();
     }
+}
+
+/// Maps a NumPy unary ufunc name to its overloaded LLVM intrinsic (on `f64`),
+/// or `None` if the name is not an element-wise unary ufunc.
+///
+/// The set of names here must match [`crate::compiler::arrayness::NUMPY_UFUNCS`]
+/// (guarded by `test_ufunc_tables_agree`).
+pub fn ufunc_intrinsic(func: &str) -> Option<&'static str> {
+    Some(match func {
+        "sqrt" => "llvm.sqrt",
+        "abs" => "llvm.fabs",
+        "exp" => "llvm.exp",
+        "log" => "llvm.log",
+        "sin" => "llvm.sin",
+        "cos" => "llvm.cos",
+        "floor" => "llvm.floor",
+        "ceil" => "llvm.ceil",
+        _ => return None,
+    })
+}
+
+/// Looks up an overloaded-on-`f64` LLVM intrinsic and returns its declaration.
+fn intrinsic_f64<'ctx>(
+    compiler: &Compiler<'ctx>,
+    intrinsic: &str,
+) -> Result<FunctionValue<'ctx>, CodeGenError> {
+    let f64_type = compiler.context.f64_type();
+    let intr = Intrinsic::find(intrinsic).ok_or_else(|| {
+        CodeGenError::UnsupportedFeature(format!("unknown intrinsic '{intrinsic}'"))
+    })?;
+    intr.get_declaration(&compiler.module, &[f64_type.into()])
+        .ok_or_else(|| {
+            CodeGenError::UnsupportedFeature(format!("could not declare intrinsic '{intrinsic}'"))
+        })
+}
+
+/// Applies a unary intrinsic to a scalar PyObject, returning a scalar float.
+pub fn unary_scalar<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    obj: IntValue<'ctx>,
+    intrinsic: &str,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let decl = intrinsic_f64(compiler, intrinsic)?;
+    let x = compiler.extract_payload(obj);
+    let y = match compiler
+        .builder
+        .build_call(decl, &[x.into()], "ufunc")
+        .unwrap()
+        .try_as_basic_value()
+    {
+        inkwell::values::ValueKind::Basic(v) => v.into_float_value(),
+        _ => {
+            return Err(CodeGenError::ModuleVerification(
+                "intrinsic returned no value".to_string(),
+            ))
+        }
+    };
+    Ok(compiler.create_pyobject_float(y))
+}
+
+/// Applies an element-wise unary intrinsic (e.g. `llvm.sqrt`) over an array,
+/// returning a new array. Like the arithmetic loops, this is the canonical
+/// shape LLVM vectorises (to `vsqrtpd` and friends where a vector form exists).
+pub fn unary_map<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    intrinsic: &str,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let decl = intrinsic_f64(compiler, intrinsic)?;
+
+    let src_base = compiler.extract_array_ptr(arr_obj);
+    let len = array_len(compiler, src_base);
+    let src_data = data_ptr(compiler, src_base);
+    let base = alloc_array(compiler, len, DTYPE_F64)?;
+    let dst_data = data_ptr(compiler, base);
+
+    emit_counted_loop(compiler, len, |compiler, i| {
+        let x = load_f64(compiler, src_data, i);
+        let y = match compiler
+            .builder
+            .build_call(decl, &[x.into()], "ufunc")
+            .unwrap()
+            .try_as_basic_value()
+        {
+            inkwell::values::ValueKind::Basic(v) => v.into_float_value(),
+            _ => {
+                return Err(CodeGenError::ModuleVerification(
+                    "intrinsic returned no value".to_string(),
+                ))
+            }
+        };
+        store_f64(compiler, dst_data, i, y);
+        Ok(())
+    })?;
+    Ok(compiler.create_pyobject_array(base))
+}
+
+/// `np.dot(a, b)` — 1-D dot product `sum(a[i] * b[i])` as a scalar float
+/// PyObject. Assumes equal lengths (uses `a`'s length).
+pub fn dot<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    a_obj: IntValue<'ctx>,
+    b_obj: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let f64_type = compiler.context.f64_type();
+    let a_base = compiler.extract_array_ptr(a_obj);
+    let len = array_len(compiler, a_base);
+    let a_data = data_ptr(compiler, a_base);
+    let b_base = compiler.extract_array_ptr(b_obj);
+    let b_data = data_ptr(compiler, b_base);
+
+    let acc_ptr = compiler.builder.build_alloca(f64_type, "acc").unwrap();
+    compiler
+        .builder
+        .build_store(acc_ptr, f64_type.const_float(0.0))
+        .unwrap();
+
+    emit_counted_loop(compiler, len, |compiler, i| {
+        let x = load_f64(compiler, a_data, i);
+        let y = load_f64(compiler, b_data, i);
+        let prod = compiler.builder.build_float_mul(x, y, "prod").unwrap();
+        let cur = compiler
+            .builder
+            .build_load(compiler.context.f64_type(), acc_ptr, "acc_cur")
+            .unwrap()
+            .into_float_value();
+        let next = compiler
+            .builder
+            .build_float_add(cur, prod, "acc_next")
+            .unwrap();
+        compiler.builder.build_store(acc_ptr, next).unwrap();
+        Ok(())
+    })?;
+
+    let result = compiler
+        .builder
+        .build_load(f64_type, acc_ptr, "acc_final")
+        .unwrap()
+        .into_float_value();
+    Ok(compiler.create_pyobject_float(result))
+}
+
+/// `arr.prod()` — product of all elements as a scalar float PyObject.
+pub fn reduce_prod<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let f64_type = compiler.context.f64_type();
+    let base = compiler.extract_array_ptr(arr_obj);
+    let len = array_len(compiler, base);
+    let data = data_ptr(compiler, base);
+
+    let acc_ptr = compiler.builder.build_alloca(f64_type, "acc").unwrap();
+    compiler
+        .builder
+        .build_store(acc_ptr, f64_type.const_float(1.0))
+        .unwrap();
+
+    emit_counted_loop(compiler, len, |compiler, i| {
+        let cur = compiler
+            .builder
+            .build_load(compiler.context.f64_type(), acc_ptr, "acc_cur")
+            .unwrap()
+            .into_float_value();
+        let elem = load_f64(compiler, data, i);
+        let next = compiler
+            .builder
+            .build_float_mul(cur, elem, "acc_next")
+            .unwrap();
+        compiler.builder.build_store(acc_ptr, next).unwrap();
+        Ok(())
+    })?;
+
+    let result = compiler
+        .builder
+        .build_load(f64_type, acc_ptr, "acc_final")
+        .unwrap()
+        .into_float_value();
+    Ok(compiler.create_pyobject_float(result))
 }
 
 /// Unboxes a scalar PyObject (int/float/bool) to an `i64` index value.

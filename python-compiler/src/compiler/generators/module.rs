@@ -59,6 +59,10 @@ pub fn compile_method_call<'ctx>(
             expect_argc(method, args, 0)?;
             ndarray::reduce_min(compiler, recv)
         }
+        "prod" => {
+            expect_argc(method, args, 0)?;
+            ndarray::reduce_prod(compiler, recv)
+        }
         other => Err(CodeGenError::UnsupportedFeature(format!(
             "unknown method '.{other}()'"
         ))),
@@ -86,6 +90,20 @@ fn compile_numpy_call<'ctx>(
     func: &str,
     args: &[IRExpr],
 ) -> Result<IntValue<'ctx>, CodeGenError> {
+    // Element-wise unary ufuncs (np.sqrt, np.exp, ...). Like NumPy they apply
+    // element-wise to an array and directly to a scalar; the array-vs-scalar
+    // choice follows the argument's compile-time arrayness.
+    if let Some(intrinsic) = ndarray::ufunc_intrinsic(func) {
+        expect_argc(func, args, 1)?;
+        let arg_is_array = compiler.expr_may_be_array(&args[0]);
+        let arg = compiler.compile_expression(&args[0])?;
+        return if arg_is_array {
+            ndarray::unary_map(compiler, arg, intrinsic)
+        } else {
+            ndarray::unary_scalar(compiler, arg, intrinsic)
+        };
+    }
+
     match func {
         // Constructors.
         "array" => {
@@ -128,6 +146,18 @@ fn compile_numpy_call<'ctx>(
             expect_argc(func, args, 1)?;
             let arr = compiler.compile_expression(&args[0])?;
             ndarray::reduce_min(compiler, arr)
+        }
+        "prod" => {
+            expect_argc(func, args, 1)?;
+            let arr = compiler.compile_expression(&args[0])?;
+            ndarray::reduce_prod(compiler, arr)
+        }
+        // Linear algebra: 1-D dot product.
+        "dot" => {
+            expect_argc(func, args, 2)?;
+            let a = compiler.compile_expression(&args[0])?;
+            let b = compiler.compile_expression(&args[1])?;
+            ndarray::dot(compiler, a, b)
         }
         // Constants (lowered to zero-argument module calls).
         "pi" => Ok(compiler.create_pyobject_float(

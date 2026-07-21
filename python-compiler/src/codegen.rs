@@ -698,8 +698,11 @@ impl<'ctx> Compiler<'ctx> {
     /// seeded into `maybe_array_vars` when a function body is compiled.
     pub(crate) fn expr_may_be_array(&self, expr: &IRExpr) -> bool {
         match expr {
-            IRExpr::ModuleCall { module, func, .. } => {
-                module == "numpy" && matches!(func.as_str(), "array" | "zeros" | "ones" | "arange")
+            IRExpr::ModuleCall { module, func, args } => {
+                module == "numpy"
+                    && crate::compiler::arrayness::numpy_call_returns_array(func, args, |a| {
+                        self.expr_may_be_array(a)
+                    })
             }
             IRExpr::BinaryOp { op, left, right } => {
                 matches!(

@@ -83,10 +83,38 @@ print(a.sum())   # 14.0
 print(a.mean())  # 2.8
 print(a.max())   # 5.0
 print(a.min())   # 1.0
+print(a.prod())  # 60.0
 print(np.sum(a)) # 14.0  (free-function form)
 print(np.max(a)) # 5.0
 print(len(a))    # 5
 print(a.size)    # 5
+```
+
+## Element-wise math (ufuncs)
+
+Unary universal functions apply element-wise and return a new array. They lower
+to LLVM intrinsics, so the loop auto-vectorizes (e.g. `vsqrtpd`). Applied to a
+scalar, they return a scalar — just like NumPy.
+
+```python
+import numpy as np
+
+a = np.array([1.0, 4.0, 9.0, 16.0])
+print(np.sqrt(a))        # [1. 2. 3. 4.]
+print(np.abs(np.array([-1.0, 2.0])))   # [1. 2.]
+print(np.exp(np.zeros(3)))             # [1. 1. 1.]
+print(np.sqrt(2.0))                    # 1.414214  (scalar)
+```
+
+Available: `np.sqrt`, `np.abs`, `np.exp`, `np.log`, `np.sin`, `np.cos`,
+`np.floor`, `np.ceil`.
+
+## Linear algebra
+
+```python
+x = np.array([1.0, 2.0, 3.0])
+y = np.array([4.0, 5.0, 6.0])
+print(np.dot(x, y))      # 32.0  (1-D dot product)
 ```
 
 ## Printing
@@ -135,7 +163,9 @@ The subset keeps growing. Not yet supported:
 - **Slice assignment** (`a[1:3] = ...`), fancy/boolean indexing, negative
   indices, and slice steps. Single-element item assignment and copy-slicing
   *are* supported.
-- Most of the wider NumPy API (`reshape`, `dot`/`@`, ufuncs like `np.sqrt`, …).
+- The `@` matmul operator and 2-D `np.dot`; higher-dimensional linear algebra.
+- Much of the wider NumPy API (`reshape`, `.T`, `np.concatenate`, more ufuncs
+  such as `np.tanh`/`np.power`, …).
 
 See [Limitations](/limitations) for the full list and the
 [Roadmap](/roadmap) for what comes next.

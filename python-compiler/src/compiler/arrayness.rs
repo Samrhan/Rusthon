@@ -22,6 +22,51 @@
 use crate::ast::{BinOp, IRExpr, IRStmt};
 use std::collections::{HashMap, HashSet};
 
+/// NumPy constructor functions that build a fresh array.
+const NUMPY_CONSTRUCTORS: &[&str] = &["array", "zeros", "ones", "arange"];
+
+/// Element-wise unary math functions (ufuncs). Each maps an array to a new
+/// array, so — like constructors — a call to one yields an array. The codegen
+/// mapping to LLVM intrinsics lives in `generators::ndarray::ufunc_intrinsic`;
+/// the two lists are kept in sync by `test_ufunc_tables_agree`.
+pub const NUMPY_UFUNCS: &[&str] = &["sqrt", "abs", "exp", "log", "sin", "cos", "floor", "ceil"];
+
+/// Whether `func` is a NumPy array constructor (`array`/`zeros`/`ones`/`arange`).
+pub fn is_numpy_constructor(func: &str) -> bool {
+    NUMPY_CONSTRUCTORS.contains(&func)
+}
+
+/// Whether `func` is an element-wise unary ufunc (`sqrt`/`exp`/...).
+pub fn is_numpy_ufunc(func: &str) -> bool {
+    NUMPY_UFUNCS.contains(&func)
+}
+
+/// Whether a `numpy.<func>(args)` call evaluates to an array, given a predicate
+/// that reports whether each argument may be an array.
+///
+/// This is the single source of truth shared by the interprocedural analysis
+/// ([`expr_is_array`]) and codegen ([`Compiler::expr_may_be_array`]):
+/// - constructors always yield an array;
+/// - a ufunc mirrors its argument (`np.sqrt(arr)` is an array, `np.sqrt(x)` a
+///   scalar), exactly like NumPy;
+/// - reductions (`sum`/`mean`/`max`/`min`/`prod`/`dot`) and constants
+///   (`pi`/`e`) yield scalars.
+///
+/// [`Compiler::expr_may_be_array`]: crate::codegen::Compiler::expr_may_be_array
+pub fn numpy_call_returns_array(
+    func: &str,
+    args: &[IRExpr],
+    arg_is_array: impl Fn(&IRExpr) -> bool,
+) -> bool {
+    if is_numpy_constructor(func) {
+        return true;
+    }
+    if is_numpy_ufunc(func) {
+        return args.first().is_some_and(arg_is_array);
+    }
+    false
+}
+
 /// Interprocedural arrayness facts for a program.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ArraynessInfo {
@@ -268,8 +313,9 @@ fn analyze_expr(
 /// [`Compiler::expr_may_be_array`]: crate::codegen::Compiler::expr_may_be_array
 fn expr_is_array(expr: &IRExpr, ctx: &HashSet<String>, info: &ArraynessInfo) -> bool {
     match expr {
-        IRExpr::ModuleCall { module, func, .. } => {
-            module == "numpy" && matches!(func.as_str(), "array" | "zeros" | "ones" | "arange")
+        IRExpr::ModuleCall { module, func, args } => {
+            module == "numpy"
+                && numpy_call_returns_array(func, args, |a| expr_is_array(a, ctx, info))
         }
         IRExpr::Slice { .. } => true,
         IRExpr::BinaryOp { op, left, right } => {

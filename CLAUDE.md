@@ -154,7 +154,7 @@ Value:   3         10          20          30
 | `compiler/generators/expression.rs` | Expression codegen | `compile_binary_op`, `compile_comparison`, list/index/len/call helpers |
 | `compiler/generators/statement.rs` | Statement codegen | Statement compilation helpers |
 | `compiler/generators/module.rs` | Module/method/attribute dispatch | `compile_module_call`, `compile_method_call`, `compile_attribute` |
-| `compiler/generators/ndarray.rs` | NumPy ndarray codegen | `from_list`, `zeros`/`ones`/`arange`, `binop`, `reduce_sum`/`mean`/`reduce_max`/`reduce_min`, `store_index`, `slice`, `print_array` |
+| `compiler/generators/ndarray.rs` | NumPy ndarray codegen | `from_list`, `zeros`/`ones`/`arange`, `binop`, reductions (`reduce_sum`/`mean`/`max`/`min`/`prod`/`dot`), `unary_map` (ufuncs), `store_index`, `slice`, `print_array` |
 | `tagged_pointer.rs` | NaN-boxing reference impl | `box_int()`, `unbox_int()`, type discrimination + unit tests |
 | `error.rs` | Error types & reporting | `CodeGenError`, `LoweringError`, ariadne diagnostics |
 
@@ -176,13 +176,13 @@ Value:   3         10          20          30
 | `integration.rs` | End-to-end scenarios | 4 |
 | `lists.rs` | List operations | 6 |
 | `minimal_test.rs` | Smoke test | 1 |
-| `numpy.rs` | NumPy subset (arrays, module system) | 21 |
+| `numpy.rs` | NumPy subset (arrays, module system) | 26 |
 | `precedence.rs` | Operator precedence | 18 |
 | `strings.rs` | String operations | 28 |
 | `unary.rs` | Unary operators | 15 |
 | `variables.rs` | Variable assignment | 3 |
 
-**Total**: 205 tests
+**Total**: 210 tests
 
 ### Documentation (`docs/`)
 
