@@ -1,5 +1,5 @@
 use crate::ast::{BinOp, IRExpr, IRStmt};
-use crate::compiler::arrayness::ArraynessInfo;
+use crate::compiler::arrayness::{self, ArrayDtype, ArraynessInfo};
 use crate::compiler::generators::{expression, module, statement};
 use crate::compiler::runtime::{FormatStrings, Runtime};
 use crate::compiler::values::{ValueManager, TYPE_TAG_INT, TYPE_TAG_STRING};
@@ -11,7 +11,7 @@ use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, Targe
 use inkwell::values::{FloatValue, FunctionValue, IntValue, PointerValue};
 use inkwell::FloatPredicate;
 use inkwell::OptimizationLevel;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Once;
 use thiserror::Error;
 
@@ -32,12 +32,12 @@ pub struct Compiler<'ctx> {
     pub(crate) builder: Builder<'ctx>,
     pub(crate) module: Module<'ctx>,
     pub(crate) variables: HashMap<String, PointerValue<'ctx>>,
-    // Names of variables that may hold a NumPy array in the current scope.
-    // This drives *pay-as-you-go* array support: the runtime array-dispatch for
-    // arithmetic, indexing and len() is emitted only where an operand might be
-    // an array, so scalar-only code compiles exactly as it did before arrays
-    // existed. It is a conservative "may" analysis (see `expr_may_be_array`).
-    pub(crate) maybe_array_vars: HashSet<String>,
+    // Variables that may hold a NumPy array in the current scope, mapped to the
+    // array's element dtype. This drives *pay-as-you-go* array support: the
+    // array code paths (arithmetic, indexing, len, print, ...) are emitted only
+    // where an operand might be an array, so scalar-only code compiles exactly
+    // as it did before arrays existed. See `expr_array_dtype`.
+    pub(crate) array_vars: HashMap<String, ArrayDtype>,
     pub(crate) functions: HashMap<String, FunctionValue<'ctx>>,
     pub(crate) function_defaults: HashMap<String, Vec<Option<IRExpr>>>,
     // Stack of (continue_target, break_target) basic blocks for nested loops
@@ -74,7 +74,7 @@ impl<'ctx> Compiler<'ctx> {
             builder,
             module,
             variables: HashMap::new(),
-            maybe_array_vars: HashSet::new(),
+            array_vars: HashMap::new(),
             functions: HashMap::new(),
             function_defaults: HashMap::new(),
             loop_stack: Vec::new(),
@@ -172,11 +172,6 @@ impl<'ctx> Compiler<'ctx> {
         self.values.is_float(&self.builder, pyobject)
     }
 
-    /// Checks if a PyObject is an ndarray (i1 result).
-    pub(crate) fn is_array(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
-        self.values.is_array(&self.builder, pyobject)
-    }
-
     /// Extracts the tag from a NaN-boxed PyObject
     /// Returns tag as i64 for compatibility (0=INT, 1=FLOAT, 2=BOOL, 3=STRING, 4=LIST)
     pub(crate) fn extract_tag(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
@@ -189,6 +184,11 @@ impl<'ctx> Compiler<'ctx> {
     /// For pointers: extract as integer and convert to f64
     pub(crate) fn extract_payload(&self, pyobject: IntValue<'ctx>) -> FloatValue<'ctx> {
         self.values.extract_payload(&self.builder, pyobject)
+    }
+
+    /// Extracts the exact raw `i64` value from a NaN-boxed integer PyObject.
+    pub(crate) fn extract_int(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
+        self.values.extract_int(&self.builder, pyobject)
     }
 
     /// Converts a PyObject to a boolean (i1) for conditionals
@@ -645,16 +645,20 @@ impl<'ctx> Compiler<'ctx> {
         let saved_variables = self.variables.clone();
         self.variables.clear();
         // Array tracking starts fresh in a function body, seeded with the
-        // parameters the interprocedural analysis found may receive an array.
-        let saved_array_vars = std::mem::take(&mut self.maybe_array_vars);
-        let array_params: Vec<String> = params
+        // parameters the interprocedural analysis found may receive an array
+        // (with their dtypes).
+        let saved_array_vars = std::mem::take(&mut self.array_vars);
+        let array_params: Vec<(String, ArrayDtype)> = params
             .iter()
             .enumerate()
-            .filter(|(i, _)| self.arrayness.param_is_array(name, *i))
-            .map(|(_, p)| p.clone())
+            .filter_map(|(i, p)| {
+                self.arrayness
+                    .param_dtype(name, i)
+                    .map(|dt| (p.clone(), dt))
+            })
             .collect();
-        for param in array_params {
-            self.maybe_array_vars.insert(param);
+        for (param, dtype) in array_params {
+            self.array_vars.insert(param, dtype);
         }
 
         // Set up parameters as local variables
@@ -672,7 +676,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Restore variable scope
         self.variables = saved_variables;
-        self.maybe_array_vars = saved_array_vars;
+        self.array_vars = saved_array_vars;
 
         // Verify function
         if !function.verify(true) {
@@ -686,36 +690,59 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Conservative compile-time test: could this expression evaluate to a
-    /// NumPy array at runtime?
-    ///
-    /// This is a "may" analysis — it must return `true` for every expression
-    /// that could possibly be an array (a false negative would miscompile array
-    /// code), while `false` simply means "definitely scalar, skip the array
-    /// machinery". The set of array producers is closed and small: NumPy
-    /// constructors, slices, element-wise arithmetic with an array operand,
-    /// variables already known to (maybe) hold an array, and calls to functions
-    /// the interprocedural analysis found to return arrays. Array parameters are
-    /// seeded into `maybe_array_vars` when a function body is compiled.
+    /// NumPy array? Convenience over [`Compiler::expr_array_dtype`].
     pub(crate) fn expr_may_be_array(&self, expr: &IRExpr) -> bool {
+        self.expr_array_dtype(expr).is_some()
+    }
+
+    /// The dtype of the array `expr` evaluates to, or `None` if it is definitely
+    /// not an array.
+    ///
+    /// This is a "may" analysis — it must return `Some` for every expression
+    /// that could be an array (a false negative would miscompile array code),
+    /// while `None` means "definitely scalar, skip the array machinery". The set
+    /// of array producers is closed: NumPy constructors/ufuncs, slices,
+    /// element-wise arithmetic with an array operand, variables known to hold an
+    /// array, and calls to array-returning functions. Array parameters are
+    /// seeded into `array_vars` (with their dtype) when a function body is
+    /// compiled. The dtype selects int-vs-float codegen and must be known
+    /// statically ([`ArrayDtype::Unknown`] is a compile-time error at use).
+    pub(crate) fn expr_array_dtype(&self, expr: &IRExpr) -> Option<ArrayDtype> {
         match expr {
-            IRExpr::ModuleCall { module, func, args } => {
-                module == "numpy"
-                    && crate::compiler::arrayness::numpy_call_returns_array(func, args, |a| {
-                        self.expr_may_be_array(a)
-                    })
+            IRExpr::ModuleCall { module, func, args } if module == "numpy" => {
+                arrayness::numpy_call_dtype(func, args, |a| self.expr_array_dtype(a))
             }
-            IRExpr::BinaryOp { op, left, right } => {
-                matches!(
+            IRExpr::Slice { value, .. } => self.expr_array_dtype(value),
+            IRExpr::BinaryOp { op, left, right }
+                if matches!(
                     op,
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
-                ) && (self.expr_may_be_array(left) || self.expr_may_be_array(right))
+                ) =>
+            {
+                arrayness::binop_result_dtype(op, left, right, |e| self.expr_array_dtype(e))
             }
-            IRExpr::Variable(name) => self.maybe_array_vars.contains(name),
-            // Slicing an array yields an array.
-            IRExpr::Slice { .. } => true,
-            // A call whose callee may return an array (interprocedural fact).
-            IRExpr::Call { func, .. } => self.arrayness.call_returns_array(func),
-            _ => false,
+            IRExpr::Variable(name) => self.array_vars.get(name).copied(),
+            IRExpr::Call { func, .. } => self.arrayness.return_dtype(func),
+            _ => None,
+        }
+    }
+
+    /// The concrete (int or float) dtype of an array expression, erroring if it
+    /// is not an array or if its dtype is statically indeterminate.
+    pub(crate) fn require_known_array_dtype(
+        &self,
+        expr: &IRExpr,
+    ) -> Result<ArrayDtype, CodeGenError> {
+        match self.expr_array_dtype(expr) {
+            Some(ArrayDtype::Unknown) => Err(CodeGenError::UnsupportedFeature(
+                "array dtype could not be determined statically (a value that is \
+                 int-typed on one path and float-typed on another is not supported)"
+                    .to_string(),
+            )),
+            Some(dtype) => Ok(dtype),
+            None => Err(CodeGenError::UnsupportedFeature(
+                "expected a NumPy array".to_string(),
+            )),
         }
     }
 

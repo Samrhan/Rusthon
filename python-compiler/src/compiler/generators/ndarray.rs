@@ -28,16 +28,28 @@
 
 use crate::ast::BinOp;
 use crate::codegen::{CodeGenError, Compiler};
+use crate::compiler::arrayness::ArrayDtype;
 use inkwell::intrinsics::Intrinsic;
 use inkwell::values::{FloatValue, FunctionValue, IntValue, PointerValue};
 
-/// Element dtype tag for `float64` arrays.
+/// Element dtype tag for `float64` arrays (stored in the array header).
 pub const DTYPE_F64: i64 = 0;
+/// Element dtype tag for `int64` arrays.
+pub const DTYPE_I64: i64 = 1;
 
 /// Number of `i64`-sized header words preceding the data buffer.
 const HEADER_WORDS: u64 = 3;
 /// Word offset of the `size` field within the header.
 const SIZE_WORD: u64 = 2;
+
+/// The header dtype tag for an [`ArrayDtype`]. `Unknown` should be rejected by
+/// callers before reaching codegen; it is treated as float defensively.
+fn dtype_tag(dtype: ArrayDtype) -> i64 {
+    match dtype {
+        ArrayDtype::Int => DTYPE_I64,
+        ArrayDtype::Float | ArrayDtype::Unknown => DTYPE_F64,
+    }
+}
 
 /// Allocates an uninitialised array with `len` elements of the given dtype and
 /// writes its header. Returns the base pointer (data is left uninitialised).
@@ -182,6 +194,66 @@ fn store_f64<'ctx>(
     compiler.builder.build_store(ptr, value).unwrap();
 }
 
+/// Address of `data[index]`, addressing the buffer as `i64` elements.
+fn elem_ptr_i64<'ctx>(
+    compiler: &Compiler<'ctx>,
+    data: PointerValue<'ctx>,
+    index: IntValue<'ctx>,
+) -> PointerValue<'ctx> {
+    let i64_type = compiler.context.i64_type();
+    unsafe {
+        compiler
+            .builder
+            .build_in_bounds_gep(i64_type, data, &[index], "elem_ptr")
+            .unwrap()
+    }
+}
+
+/// Loads `data[index]` as an `i64`.
+fn load_i64<'ctx>(
+    compiler: &Compiler<'ctx>,
+    data: PointerValue<'ctx>,
+    index: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    let ptr = elem_ptr_i64(compiler, data, index);
+    compiler
+        .builder
+        .build_load(compiler.context.i64_type(), ptr, "elem_i")
+        .unwrap()
+        .into_int_value()
+}
+
+/// Stores `value` into `data[index]` as an `i64`.
+fn store_i64<'ctx>(
+    compiler: &Compiler<'ctx>,
+    data: PointerValue<'ctx>,
+    index: IntValue<'ctx>,
+    value: IntValue<'ctx>,
+) {
+    let ptr = elem_ptr_i64(compiler, data, index);
+    compiler.builder.build_store(ptr, value).unwrap();
+}
+
+/// Loads `data[index]` and converts it to `f64` for float-typed computation
+/// (int elements are widened with `sitofp`).
+fn load_as_f64<'ctx>(
+    compiler: &Compiler<'ctx>,
+    data: PointerValue<'ctx>,
+    index: IntValue<'ctx>,
+    dtype: ArrayDtype,
+) -> FloatValue<'ctx> {
+    match dtype {
+        ArrayDtype::Int => {
+            let raw = load_i64(compiler, data, index);
+            compiler
+                .builder
+                .build_signed_int_to_float(raw, compiler.context.f64_type(), "to_f64")
+                .unwrap()
+        }
+        _ => load_f64(compiler, data, index),
+    }
+}
+
 /// Emits a `for i in 0..count` counted loop, invoking `body` once to generate
 /// the loop body with the current induction value. The body must not itself
 /// terminate the current block (straight-line code and calls are fine).
@@ -262,14 +334,15 @@ where
     Ok(())
 }
 
-/// `np.array(list)` — builds a `float64` array from a Rusthon list by unboxing
-/// each element into the contiguous data buffer.
+/// `np.array(list)` — builds an array of the given dtype from a Rusthon list by
+/// unboxing each element into the contiguous (int or float) data buffer.
 pub fn from_list<'ctx>(
     compiler: &mut Compiler<'ctx>,
     list_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
     let (list_ptr, list_len) = compiler.extract_list_ptr_and_len(list_obj);
-    let base = alloc_array(compiler, list_len, DTYPE_F64)?;
+    let base = alloc_array(compiler, list_len, dtype_tag(dtype))?;
     let data = data_ptr(compiler, base);
     let pyobject_type = compiler.create_pyobject_type();
 
@@ -294,8 +367,16 @@ pub fn from_list<'ctx>(
             .build_load(pyobject_type, src, "boxed_elem")
             .unwrap()
             .into_int_value();
-        let value = compiler.extract_payload(boxed);
-        store_f64(compiler, data, i, value);
+        match dtype {
+            ArrayDtype::Int => {
+                let value = compiler.extract_int(boxed);
+                store_i64(compiler, data, i, value);
+            }
+            _ => {
+                let value = compiler.extract_payload(boxed);
+                store_f64(compiler, data, i, value);
+            }
+        }
         Ok(())
     })?;
 
@@ -343,213 +424,345 @@ pub fn ones<'ctx>(
     })
 }
 
-/// `np.arange(n)` — array of `0.0, 1.0, ..., n-1`.
+/// `np.arange(n)` — `int64` array of `0, 1, ..., n-1` (NumPy's default dtype).
 pub fn arange<'ctx>(
     compiler: &mut Compiler<'ctx>,
     len_obj: IntValue<'ctx>,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
-    build_filled(compiler, len_obj, |compiler, i| {
-        compiler
-            .builder
-            .build_signed_int_to_float(i, compiler.context.f64_type(), "arange_val")
-            .unwrap()
-    })
+    let len = scalar_to_i64(compiler, len_obj);
+    let base = alloc_array(compiler, len, DTYPE_I64)?;
+    let data = data_ptr(compiler, base);
+    emit_counted_loop(compiler, len, |compiler, i| {
+        store_i64(compiler, data, i, i);
+        Ok(())
+    })?;
+    Ok(compiler.create_pyobject_array(base))
 }
 
-/// Element-wise binary op with NumPy-style scalar broadcasting.
-///
-/// At least one operand is known (at runtime) to be an array; `lhs_is_array` /
-/// `rhs_is_array` are the `i1` results of that test. Broadcasting is done with
-/// the classic **stride trick**: an array operand reads `data[i]` (stride 1) and
-/// a scalar operand reads a 1-element slot (stride 0), so the inner loop is
-/// branch-free and vectorisable.
+/// One operand of an element-wise op: an array (data pointer + element dtype)
+/// or a scalar carrying its unboxed value in both representations.
+struct Operand<'ctx> {
+    /// `Some((data, dtype))` when the operand is an array.
+    array: Option<(PointerValue<'ctx>, ArrayDtype)>,
+    scalar_f64: FloatValue<'ctx>,
+    scalar_i64: IntValue<'ctx>,
+}
+
+impl<'ctx> Operand<'ctx> {
+    /// Value at index `i` as an `f64` (int arrays/scalars are widened).
+    fn as_f64(&self, compiler: &Compiler<'ctx>, i: IntValue<'ctx>) -> FloatValue<'ctx> {
+        match self.array {
+            Some((data, dtype)) => load_as_f64(compiler, data, i, dtype),
+            None => self.scalar_f64,
+        }
+    }
+
+    /// Value at index `i` as an `i64` (only used for the all-integer path).
+    fn as_i64(&self, compiler: &Compiler<'ctx>, i: IntValue<'ctx>) -> IntValue<'ctx> {
+        match self.array {
+            Some((data, _)) => load_i64(compiler, data, i),
+            None => self.scalar_i64,
+        }
+    }
+}
+
+/// Element-wise binary op with NumPy-style scalar broadcasting and dtype
+/// promotion. Operand array-ness/dtype and the `result` dtype are known at
+/// compile time (`dtype = None` marks a scalar operand), so the right int- or
+/// float-typed loop is emitted directly — no runtime dtype or array checks —
+/// keeping the loop vectorisable.
+#[allow(clippy::too_many_arguments)]
 pub fn binop<'ctx>(
     compiler: &mut Compiler<'ctx>,
     op: &BinOp,
     lhs_obj: IntValue<'ctx>,
     rhs_obj: IntValue<'ctx>,
-    lhs_is_array: IntValue<'ctx>,
-    rhs_is_array: IntValue<'ctx>,
+    lhs_dtype: Option<ArrayDtype>,
+    rhs_dtype: Option<ArrayDtype>,
+    result: ArrayDtype,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
-    // Per-operand data pointer + stride. Pointer arithmetic (extract/gep) never
-    // dereferences, so it is safe to compute for a scalar operand too — the
-    // stride-0 select just makes the bogus array pointer unused.
-    let (lhs_ptr, lhs_stride) = operand_source(compiler, lhs_obj, lhs_is_array);
-    let (rhs_ptr, rhs_stride) = operand_source(compiler, rhs_obj, rhs_is_array);
+    let lhs_base = lhs_dtype.map(|dt| (compiler.extract_array_ptr(lhs_obj), dt));
+    let rhs_base = rhs_dtype.map(|dt| (compiler.extract_array_ptr(rhs_obj), dt));
 
-    let length = array_length_of(compiler, lhs_obj, rhs_obj, lhs_is_array);
+    // The result length is that of whichever operand is an array (equal when
+    // both are). At least one is an array, so this is compile-time decidable.
+    let length = match (lhs_base, rhs_base) {
+        (Some((base, _)), _) | (_, Some((base, _))) => array_len(compiler, base),
+        (None, None) => {
+            return Err(CodeGenError::ModuleVerification(
+                "array binop with no array operand".to_string(),
+            ))
+        }
+    };
 
-    let base = alloc_array(compiler, length, DTYPE_F64)?;
-    let result_data = data_ptr(compiler, base);
+    let lhs = Operand {
+        array: lhs_base.map(|(base, dt)| (data_ptr(compiler, base), dt)),
+        scalar_f64: compiler.extract_payload(lhs_obj),
+        scalar_i64: compiler.extract_int(lhs_obj),
+    };
+    let rhs = Operand {
+        array: rhs_base.map(|(base, dt)| (data_ptr(compiler, base), dt)),
+        scalar_f64: compiler.extract_payload(rhs_obj),
+        scalar_i64: compiler.extract_int(rhs_obj),
+    };
+
+    let result_base = alloc_array(compiler, length, dtype_tag(result))?;
+    let result_data = data_ptr(compiler, result_base);
 
     let op = op.clone();
     emit_counted_loop(compiler, length, |compiler, i| {
-        let off_l = compiler
-            .builder
-            .build_int_mul(i, lhs_stride, "off_l")
-            .unwrap();
-        let off_r = compiler
-            .builder
-            .build_int_mul(i, rhs_stride, "off_r")
-            .unwrap();
-        let a = load_f64(compiler, lhs_ptr, off_l);
-        let b = load_f64(compiler, rhs_ptr, off_r);
-        let r = match op {
-            BinOp::Add => compiler.builder.build_float_add(a, b, "arr_add").unwrap(),
-            BinOp::Sub => compiler.builder.build_float_sub(a, b, "arr_sub").unwrap(),
-            BinOp::Mul => compiler.builder.build_float_mul(a, b, "arr_mul").unwrap(),
-            BinOp::Div => compiler.builder.build_float_div(a, b, "arr_div").unwrap(),
-            BinOp::Mod => compiler.builder.build_float_rem(a, b, "arr_mod").unwrap(),
-            // Only arithmetic ops reach here (see `compile_binary_op`).
-            _ => unreachable!("non-arithmetic array op"),
-        };
-        store_f64(compiler, result_data, i, r);
+        if result == ArrayDtype::Int {
+            let a = lhs.as_i64(compiler, i);
+            let b = rhs.as_i64(compiler, i);
+            let r = int_binop(compiler, &op, a, b);
+            store_i64(compiler, result_data, i, r);
+        } else {
+            let a = lhs.as_f64(compiler, i);
+            let b = rhs.as_f64(compiler, i);
+            let r = float_binop(compiler, &op, a, b);
+            store_f64(compiler, result_data, i, r);
+        }
         Ok(())
     })?;
 
-    Ok(compiler.create_pyobject_array(base))
+    Ok(compiler.create_pyobject_array(result_base))
 }
 
-/// Computes `(data_ptr, stride)` for one operand of an element-wise op.
-/// Array → `(data buffer, 1)`; scalar → `(1-element slot holding the value, 0)`.
-fn operand_source<'ctx>(
-    compiler: &mut Compiler<'ctx>,
-    obj: IntValue<'ctx>,
-    is_array: IntValue<'ctx>,
-) -> (PointerValue<'ctx>, IntValue<'ctx>) {
-    let i64_type = compiler.context.i64_type();
-    let f64_type = compiler.context.f64_type();
-
-    // Array branch data pointer (safe to compute even when `obj` is scalar).
-    let arr_base = compiler.extract_array_ptr(obj);
-    let arr_data = data_ptr(compiler, arr_base);
-
-    // Scalar branch: stash the unboxed scalar in a 1-element stack slot.
-    let slot = compiler
-        .builder
-        .build_alloca(f64_type, "scalar_slot")
-        .unwrap();
-    let scalar = compiler.extract_payload(obj);
-    compiler.builder.build_store(slot, scalar).unwrap();
-
-    let ptr = compiler
-        .builder
-        .build_select(is_array, arr_data, slot, "operand_ptr")
-        .unwrap()
-        .into_pointer_value();
-    let stride = compiler
-        .builder
-        .build_select(
-            is_array,
-            i64_type.const_int(1, false),
-            i64_type.const_int(0, false),
-            "operand_stride",
-        )
-        .unwrap()
-        .into_int_value();
-    (ptr, stride)
-}
-
-/// Length of whichever operand is an array (assumes equal length when both are).
-/// A branch is required because `array_len` loads from the header, which is only
-/// valid on the operand that is actually an array.
-fn array_length_of<'ctx>(
-    compiler: &mut Compiler<'ctx>,
-    lhs_obj: IntValue<'ctx>,
-    rhs_obj: IntValue<'ctx>,
-    lhs_is_array: IntValue<'ctx>,
+/// Applies an arithmetic `op` to two `i64` values (integer semantics).
+/// `Div` never reaches here: true division always promotes to float.
+fn int_binop<'ctx>(
+    compiler: &Compiler<'ctx>,
+    op: &BinOp,
+    a: IntValue<'ctx>,
+    b: IntValue<'ctx>,
 ) -> IntValue<'ctx> {
-    let i64_type = compiler.context.i64_type();
-    let current_fn = compiler
-        .builder
-        .get_insert_block()
-        .unwrap()
-        .get_parent()
-        .unwrap();
-
-    let lhs_bb = compiler
-        .context
-        .append_basic_block(current_fn, "len_from_lhs");
-    let rhs_bb = compiler
-        .context
-        .append_basic_block(current_fn, "len_from_rhs");
-    let cont_bb = compiler.context.append_basic_block(current_fn, "len_cont");
-
-    compiler
-        .builder
-        .build_conditional_branch(lhs_is_array, lhs_bb, rhs_bb)
-        .unwrap();
-
-    compiler.builder.position_at_end(lhs_bb);
-    let lhs_base = compiler.extract_array_ptr(lhs_obj);
-    let lhs_len = array_len(compiler, lhs_base);
-    compiler
-        .builder
-        .build_unconditional_branch(cont_bb)
-        .unwrap();
-    let lhs_pred = compiler.builder.get_insert_block().unwrap();
-
-    compiler.builder.position_at_end(rhs_bb);
-    let rhs_base = compiler.extract_array_ptr(rhs_obj);
-    let rhs_len = array_len(compiler, rhs_base);
-    compiler
-        .builder
-        .build_unconditional_branch(cont_bb)
-        .unwrap();
-    let rhs_pred = compiler.builder.get_insert_block().unwrap();
-
-    compiler.builder.position_at_end(cont_bb);
-    let phi = compiler.builder.build_phi(i64_type, "arr_length").unwrap();
-    phi.add_incoming(&[(&lhs_len, lhs_pred), (&rhs_len, rhs_pred)]);
-    phi.as_basic_value().into_int_value()
+    let builder = &compiler.builder;
+    match op {
+        BinOp::Add => builder.build_int_add(a, b, "arr_iadd").unwrap(),
+        BinOp::Sub => builder.build_int_sub(a, b, "arr_isub").unwrap(),
+        BinOp::Mul => builder.build_int_mul(a, b, "arr_imul").unwrap(),
+        BinOp::Mod => builder.build_int_signed_rem(a, b, "arr_imod").unwrap(),
+        // `Div` promotes to float; other operators are not arithmetic.
+        _ => unreachable!("non-integer array op"),
+    }
 }
 
-/// `arr[i]` — loads a single element and returns it boxed as a float PyObject.
+/// Applies an arithmetic `op` to two `f64` values.
+fn float_binop<'ctx>(
+    compiler: &Compiler<'ctx>,
+    op: &BinOp,
+    a: FloatValue<'ctx>,
+    b: FloatValue<'ctx>,
+) -> FloatValue<'ctx> {
+    match op {
+        BinOp::Add => compiler.builder.build_float_add(a, b, "arr_add").unwrap(),
+        BinOp::Sub => compiler.builder.build_float_sub(a, b, "arr_sub").unwrap(),
+        BinOp::Mul => compiler.builder.build_float_mul(a, b, "arr_mul").unwrap(),
+        BinOp::Div => compiler.builder.build_float_div(a, b, "arr_div").unwrap(),
+        BinOp::Mod => compiler.builder.build_float_rem(a, b, "arr_mod").unwrap(),
+        _ => unreachable!("non-arithmetic array op"),
+    }
+}
+
+/// `arr[i]` — loads a single element and returns it boxed per the array dtype.
 pub fn index_load<'ctx>(
     compiler: &mut Compiler<'ctx>,
     arr_obj: IntValue<'ctx>,
     index_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
 ) -> IntValue<'ctx> {
     let base = compiler.extract_array_ptr(arr_obj);
     let data = data_ptr(compiler, base);
     let index = scalar_to_i64(compiler, index_obj);
-    let value = load_f64(compiler, data, index);
-    compiler.create_pyobject_float(value)
+    match dtype {
+        ArrayDtype::Int => {
+            let value = load_i64(compiler, data, index);
+            compiler.create_pyobject_int(value)
+        }
+        _ => {
+            let value = load_f64(compiler, data, index);
+            compiler.create_pyobject_float(value)
+        }
+    }
 }
 
-/// `arr.sum()` — reduces the array to a scalar float PyObject.
+/// Which associative reduction to perform.
+#[derive(Clone, Copy)]
+enum ReduceKind {
+    Sum,
+    Prod,
+    Max,
+    Min,
+}
+
+/// `arr.sum()` — sum of the elements, boxed in the array's dtype.
 pub fn reduce_sum<'ctx>(
     compiler: &mut Compiler<'ctx>,
     arr_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
-    let acc = accumulate(compiler, arr_obj)?;
-    Ok(compiler.create_pyobject_float(acc))
+    reduce(compiler, arr_obj, dtype, ReduceKind::Sum)
 }
 
-/// `arr.mean()` — sum divided by element count, as a scalar float PyObject.
-pub fn mean<'ctx>(
+/// `arr.prod()` — product of the elements, boxed in the array's dtype.
+pub fn reduce_prod<'ctx>(
     compiler: &mut Compiler<'ctx>,
     arr_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    reduce(compiler, arr_obj, dtype, ReduceKind::Prod)
+}
+
+/// `arr.max()` — largest element, boxed in the array's dtype.
+pub fn reduce_max<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    reduce(compiler, arr_obj, dtype, ReduceKind::Max)
+}
+
+/// `arr.min()` — smallest element, boxed in the array's dtype.
+pub fn reduce_min<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    reduce(compiler, arr_obj, dtype, ReduceKind::Min)
+}
+
+/// Folds an array to a scalar PyObject of the same dtype. Int arrays fold in
+/// `i64` (exact), float arrays in `f64`; min/max seed with the dtype's extreme.
+fn reduce<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    arr_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
+    kind: ReduceKind,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
     let base = compiler.extract_array_ptr(arr_obj);
     let len = array_len(compiler, base);
-    let sum = accumulate(compiler, arr_obj)?;
-    let len_f = compiler
-        .builder
-        .build_signed_int_to_float(len, compiler.context.f64_type(), "len_f")
-        .unwrap();
-    let mean = compiler
-        .builder
-        .build_float_div(sum, len_f, "mean")
-        .unwrap();
-    Ok(compiler.create_pyobject_float(mean))
+    let data = data_ptr(compiler, base);
+
+    if dtype == ArrayDtype::Int {
+        let i64_type = compiler.context.i64_type();
+        let init = match kind {
+            ReduceKind::Sum => 0,
+            ReduceKind::Prod => 1,
+            ReduceKind::Max => i64::MIN,
+            ReduceKind::Min => i64::MAX,
+        };
+        let acc_ptr = compiler.builder.build_alloca(i64_type, "acc").unwrap();
+        compiler
+            .builder
+            .build_store(acc_ptr, i64_type.const_int(init as u64, false))
+            .unwrap();
+        emit_counted_loop(compiler, len, |compiler, i| {
+            let cur = compiler
+                .builder
+                .build_load(compiler.context.i64_type(), acc_ptr, "acc_cur")
+                .unwrap()
+                .into_int_value();
+            let elem = load_i64(compiler, data, i);
+            let next = int_reduce_step(compiler, kind, cur, elem);
+            compiler.builder.build_store(acc_ptr, next).unwrap();
+            Ok(())
+        })?;
+        let result = compiler
+            .builder
+            .build_load(i64_type, acc_ptr, "acc_final")
+            .unwrap()
+            .into_int_value();
+        Ok(compiler.create_pyobject_int(result))
+    } else {
+        let f64_type = compiler.context.f64_type();
+        let init = match kind {
+            ReduceKind::Sum => 0.0,
+            ReduceKind::Prod => 1.0,
+            ReduceKind::Max => f64::NEG_INFINITY,
+            ReduceKind::Min => f64::INFINITY,
+        };
+        let acc_ptr = compiler.builder.build_alloca(f64_type, "acc").unwrap();
+        compiler
+            .builder
+            .build_store(acc_ptr, f64_type.const_float(init))
+            .unwrap();
+        emit_counted_loop(compiler, len, |compiler, i| {
+            let cur = compiler
+                .builder
+                .build_load(compiler.context.f64_type(), acc_ptr, "acc_cur")
+                .unwrap()
+                .into_float_value();
+            let elem = load_f64(compiler, data, i);
+            let next = float_reduce_step(compiler, kind, cur, elem);
+            compiler.builder.build_store(acc_ptr, next).unwrap();
+            Ok(())
+        })?;
+        let result = compiler
+            .builder
+            .build_load(f64_type, acc_ptr, "acc_final")
+            .unwrap()
+            .into_float_value();
+        Ok(compiler.create_pyobject_float(result))
+    }
 }
 
-/// Sums the elements of an array into an `f64` accumulator.
-fn accumulate<'ctx>(
+/// Combines the accumulator with an element for an integer reduction.
+fn int_reduce_step<'ctx>(
+    compiler: &Compiler<'ctx>,
+    kind: ReduceKind,
+    cur: IntValue<'ctx>,
+    elem: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    let b = &compiler.builder;
+    match kind {
+        ReduceKind::Sum => b.build_int_add(cur, elem, "acc_next").unwrap(),
+        ReduceKind::Prod => b.build_int_mul(cur, elem, "acc_next").unwrap(),
+        ReduceKind::Max | ReduceKind::Min => {
+            let pred = if matches!(kind, ReduceKind::Max) {
+                inkwell::IntPredicate::SGT
+            } else {
+                inkwell::IntPredicate::SLT
+            };
+            let better = b.build_int_compare(pred, elem, cur, "is_better").unwrap();
+            b.build_select(better, elem, cur, "acc_next")
+                .unwrap()
+                .into_int_value()
+        }
+    }
+}
+
+/// Combines the accumulator with an element for a float reduction.
+fn float_reduce_step<'ctx>(
+    compiler: &Compiler<'ctx>,
+    kind: ReduceKind,
+    cur: FloatValue<'ctx>,
+    elem: FloatValue<'ctx>,
+) -> FloatValue<'ctx> {
+    let b = &compiler.builder;
+    match kind {
+        ReduceKind::Sum => b.build_float_add(cur, elem, "acc_next").unwrap(),
+        ReduceKind::Prod => b.build_float_mul(cur, elem, "acc_next").unwrap(),
+        ReduceKind::Max | ReduceKind::Min => {
+            let pred = if matches!(kind, ReduceKind::Max) {
+                inkwell::FloatPredicate::OGT
+            } else {
+                inkwell::FloatPredicate::OLT
+            };
+            let better = b.build_float_compare(pred, elem, cur, "is_better").unwrap();
+            b.build_select(better, elem, cur, "acc_next")
+                .unwrap()
+                .into_float_value()
+        }
+    }
+}
+
+/// `arr.mean()` — sum divided by element count, always a scalar float PyObject
+/// (int elements are widened to `f64`).
+pub fn mean<'ctx>(
     compiler: &mut Compiler<'ctx>,
     arr_obj: IntValue<'ctx>,
-) -> Result<FloatValue<'ctx>, CodeGenError> {
+    dtype: ArrayDtype,
+) -> Result<IntValue<'ctx>, CodeGenError> {
     let f64_type = compiler.context.f64_type();
     let base = compiler.extract_array_ptr(arr_obj);
     let len = array_len(compiler, base);
@@ -560,14 +773,13 @@ fn accumulate<'ctx>(
         .builder
         .build_store(acc_ptr, f64_type.const_float(0.0))
         .unwrap();
-
     emit_counted_loop(compiler, len, |compiler, i| {
         let cur = compiler
             .builder
             .build_load(compiler.context.f64_type(), acc_ptr, "acc_cur")
             .unwrap()
             .into_float_value();
-        let elem = load_f64(compiler, data, i);
+        let elem = load_as_f64(compiler, data, i, dtype);
         let next = compiler
             .builder
             .build_float_add(cur, elem, "acc_next")
@@ -576,11 +788,20 @@ fn accumulate<'ctx>(
         Ok(())
     })?;
 
-    Ok(compiler
+    let sum = compiler
         .builder
         .build_load(f64_type, acc_ptr, "acc_final")
         .unwrap()
-        .into_float_value())
+        .into_float_value();
+    let len_f = compiler
+        .builder
+        .build_signed_int_to_float(len, f64_type, "len_f")
+        .unwrap();
+    let mean = compiler
+        .builder
+        .build_float_div(sum, len_f, "mean")
+        .unwrap();
+    Ok(compiler.create_pyobject_float(mean))
 }
 
 /// `arr.size` — element count as an integer PyObject.
@@ -590,18 +811,28 @@ pub fn size<'ctx>(compiler: &mut Compiler<'ctx>, arr_obj: IntValue<'ctx>) -> Int
     compiler.create_pyobject_int(len)
 }
 
-/// `arr[index] = value` — stores a scalar into an array element in place.
+/// `arr[index] = value` — stores a scalar into an array element in place,
+/// coercing the value to the array's dtype.
 pub fn store_index<'ctx>(
     compiler: &mut Compiler<'ctx>,
     arr_obj: IntValue<'ctx>,
     index_obj: IntValue<'ctx>,
     value_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
 ) {
     let base = compiler.extract_array_ptr(arr_obj);
     let data = data_ptr(compiler, base);
     let index = scalar_to_i64(compiler, index_obj);
-    let value = compiler.extract_payload(value_obj);
-    store_f64(compiler, data, index, value);
+    match dtype {
+        ArrayDtype::Int => {
+            let value = compiler.extract_int(value_obj);
+            store_i64(compiler, data, index, value);
+        }
+        _ => {
+            let value = compiler.extract_payload(value_obj);
+            store_f64(compiler, data, index, value);
+        }
+    }
 }
 
 /// `arr[lower:upper]` — returns a new array copying the `[lower, upper)` range.
@@ -615,6 +846,7 @@ pub fn slice<'ctx>(
     arr_obj: IntValue<'ctx>,
     lower: Option<IntValue<'ctx>>,
     upper: Option<IntValue<'ctx>>,
+    dtype: ArrayDtype,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
     let i64_type = compiler.context.i64_type();
     let zero = i64_type.const_int(0, false);
@@ -626,12 +858,18 @@ pub fn slice<'ctx>(
     let hi = clamp(compiler, upper.unwrap_or(len), lo, len);
     let new_len = compiler.builder.build_int_sub(hi, lo, "slice_len").unwrap();
 
-    let base = alloc_array(compiler, new_len, DTYPE_F64)?;
+    let base = alloc_array(compiler, new_len, dtype_tag(dtype))?;
     let dst_data = data_ptr(compiler, base);
+    let is_int = dtype == ArrayDtype::Int;
     emit_counted_loop(compiler, new_len, |compiler, k| {
         let src_index = compiler.builder.build_int_add(lo, k, "src_idx").unwrap();
-        let value = load_f64(compiler, src_data, src_index);
-        store_f64(compiler, dst_data, k, value);
+        if is_int {
+            let value = load_i64(compiler, src_data, src_index);
+            store_i64(compiler, dst_data, k, value);
+        } else {
+            let value = load_f64(compiler, src_data, src_index);
+            store_f64(compiler, dst_data, k, value);
+        }
         Ok(())
     })?;
     Ok(compiler.create_pyobject_array(base))
@@ -664,89 +902,19 @@ fn clamp<'ctx>(
         .into_int_value()
 }
 
-/// `arr.max()` — largest element as a scalar float PyObject.
-pub fn reduce_max<'ctx>(
-    compiler: &mut Compiler<'ctx>,
-    arr_obj: IntValue<'ctx>,
-) -> Result<IntValue<'ctx>, CodeGenError> {
-    reduce_extreme(compiler, arr_obj, true)
-}
-
-/// `arr.min()` — smallest element as a scalar float PyObject.
-pub fn reduce_min<'ctx>(
-    compiler: &mut Compiler<'ctx>,
-    arr_obj: IntValue<'ctx>,
-) -> Result<IntValue<'ctx>, CodeGenError> {
-    reduce_extreme(compiler, arr_obj, false)
-}
-
-/// Shared min/max reduction. The accumulator starts at ∓∞ so any real element
-/// wins on the first iteration; an empty array therefore reduces to ±∞.
-fn reduce_extreme<'ctx>(
-    compiler: &mut Compiler<'ctx>,
-    arr_obj: IntValue<'ctx>,
-    want_max: bool,
-) -> Result<IntValue<'ctx>, CodeGenError> {
-    let f64_type = compiler.context.f64_type();
-    let base = compiler.extract_array_ptr(arr_obj);
-    let len = array_len(compiler, base);
-    let data = data_ptr(compiler, base);
-
-    let init = if want_max {
-        f64::NEG_INFINITY
-    } else {
-        f64::INFINITY
-    };
-    let acc_ptr = compiler.builder.build_alloca(f64_type, "acc").unwrap();
-    compiler
-        .builder
-        .build_store(acc_ptr, f64_type.const_float(init))
-        .unwrap();
-
-    let pred = if want_max {
-        inkwell::FloatPredicate::OGT
-    } else {
-        inkwell::FloatPredicate::OLT
-    };
-    emit_counted_loop(compiler, len, |compiler, i| {
-        let cur = compiler
-            .builder
-            .build_load(compiler.context.f64_type(), acc_ptr, "acc_cur")
-            .unwrap()
-            .into_float_value();
-        let elem = load_f64(compiler, data, i);
-        let is_better = compiler
-            .builder
-            .build_float_compare(pred, elem, cur, "is_better")
-            .unwrap();
-        let next = compiler
-            .builder
-            .build_select(is_better, elem, cur, "acc_next")
-            .unwrap()
-            .into_float_value();
-        compiler.builder.build_store(acc_ptr, next).unwrap();
-        Ok(())
-    })?;
-
-    let result = compiler
-        .builder
-        .build_load(f64_type, acc_ptr, "acc_final")
-        .unwrap()
-        .into_float_value();
-    Ok(compiler.create_pyobject_float(result))
-}
-
-/// Prints an array as `[e0 e1 ... en]` using the compiler's float format,
-/// followed by a newline when `with_newline` is set.
+/// Prints an array as `[e0 e1 ... en]`, formatting each element per the array
+/// dtype (`%d` for int, `%f` for float), followed by a newline when set.
 pub fn print_array<'ctx>(
     compiler: &mut Compiler<'ctx>,
     arr_obj: IntValue<'ctx>,
+    dtype: ArrayDtype,
     with_newline: bool,
 ) {
     let printf = compiler.runtime.add_printf(&compiler.module);
     let base = compiler.extract_array_ptr(arr_obj);
     let len = array_len(compiler, base);
     let data = data_ptr(compiler, base);
+    let is_int = dtype == ArrayDtype::Int;
 
     let lbracket = compiler
         .builder
@@ -758,9 +926,15 @@ pub fn print_array<'ctx>(
         .build_global_string_ptr("]", "arr_rbracket")
         .unwrap()
         .as_pointer_value();
-    let float_fmt = compiler
-        .format_strings
-        .get_float_format_string_no_newline(&compiler.builder);
+    let elem_fmt = if is_int {
+        compiler
+            .format_strings
+            .get_int_format_string_no_newline(&compiler.builder)
+    } else {
+        compiler
+            .format_strings
+            .get_float_format_string_no_newline(&compiler.builder)
+    };
     let space_fmt = compiler
         .format_strings
         .get_space_format_string(&compiler.builder);
@@ -805,11 +979,19 @@ pub fn print_array<'ctx>(
             .unwrap();
 
         compiler.builder.position_at_end(elem_bb);
-        let elem = load_f64(compiler, data, i);
-        compiler
-            .builder
-            .build_call(printf, &[float_fmt.into(), elem.into()], "print_elem")
-            .unwrap();
+        if is_int {
+            let elem = load_i64(compiler, data, i);
+            compiler
+                .builder
+                .build_call(printf, &[elem_fmt.into(), elem.into()], "print_elem")
+                .unwrap();
+        } else {
+            let elem = load_f64(compiler, data, i);
+            compiler
+                .builder
+                .build_call(printf, &[elem_fmt.into(), elem.into()], "print_elem")
+                .unwrap();
+        }
         Ok(())
     })
     .expect("array print loop");
@@ -888,11 +1070,13 @@ pub fn unary_scalar<'ctx>(
 }
 
 /// Applies an element-wise unary intrinsic (e.g. `llvm.sqrt`) over an array,
-/// returning a new array. Like the arithmetic loops, this is the canonical
-/// shape LLVM vectorises (to `vsqrtpd` and friends where a vector form exists).
+/// always producing a `float64` array (int inputs are widened, as in NumPy).
+/// Like the arithmetic loops, this is the canonical shape LLVM vectorises (to
+/// `vsqrtpd` and friends where a vector form exists).
 pub fn unary_map<'ctx>(
     compiler: &mut Compiler<'ctx>,
     arr_obj: IntValue<'ctx>,
+    src_dtype: ArrayDtype,
     intrinsic: &str,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
     let decl = intrinsic_f64(compiler, intrinsic)?;
@@ -904,7 +1088,7 @@ pub fn unary_map<'ctx>(
     let dst_data = data_ptr(compiler, base);
 
     emit_counted_loop(compiler, len, |compiler, i| {
-        let x = load_f64(compiler, src_data, i);
+        let x = load_as_f64(compiler, src_data, i, src_dtype);
         let y = match compiler
             .builder
             .build_call(decl, &[x.into()], "ufunc")
@@ -924,29 +1108,62 @@ pub fn unary_map<'ctx>(
     Ok(compiler.create_pyobject_array(base))
 }
 
-/// `np.dot(a, b)` — 1-D dot product `sum(a[i] * b[i])` as a scalar float
-/// PyObject. Assumes equal lengths (uses `a`'s length).
+/// `np.dot(a, b)` — 1-D dot product `sum(a[i] * b[i])` as a scalar PyObject.
+/// Integer inputs give an integer result; any float input promotes to float.
+/// Assumes equal lengths (uses `a`'s length).
 pub fn dot<'ctx>(
     compiler: &mut Compiler<'ctx>,
     a_obj: IntValue<'ctx>,
     b_obj: IntValue<'ctx>,
+    a_dtype: ArrayDtype,
+    b_dtype: ArrayDtype,
 ) -> Result<IntValue<'ctx>, CodeGenError> {
-    let f64_type = compiler.context.f64_type();
     let a_base = compiler.extract_array_ptr(a_obj);
     let len = array_len(compiler, a_base);
     let a_data = data_ptr(compiler, a_base);
     let b_base = compiler.extract_array_ptr(b_obj);
     let b_data = data_ptr(compiler, b_base);
 
+    if a_dtype == ArrayDtype::Int && b_dtype == ArrayDtype::Int {
+        let i64_type = compiler.context.i64_type();
+        let acc_ptr = compiler.builder.build_alloca(i64_type, "acc").unwrap();
+        compiler
+            .builder
+            .build_store(acc_ptr, i64_type.const_int(0, false))
+            .unwrap();
+        emit_counted_loop(compiler, len, |compiler, i| {
+            let x = load_i64(compiler, a_data, i);
+            let y = load_i64(compiler, b_data, i);
+            let prod = compiler.builder.build_int_mul(x, y, "prod").unwrap();
+            let cur = compiler
+                .builder
+                .build_load(compiler.context.i64_type(), acc_ptr, "acc_cur")
+                .unwrap()
+                .into_int_value();
+            let next = compiler
+                .builder
+                .build_int_add(cur, prod, "acc_next")
+                .unwrap();
+            compiler.builder.build_store(acc_ptr, next).unwrap();
+            Ok(())
+        })?;
+        let result = compiler
+            .builder
+            .build_load(i64_type, acc_ptr, "acc_final")
+            .unwrap()
+            .into_int_value();
+        return Ok(compiler.create_pyobject_int(result));
+    }
+
+    let f64_type = compiler.context.f64_type();
     let acc_ptr = compiler.builder.build_alloca(f64_type, "acc").unwrap();
     compiler
         .builder
         .build_store(acc_ptr, f64_type.const_float(0.0))
         .unwrap();
-
     emit_counted_loop(compiler, len, |compiler, i| {
-        let x = load_f64(compiler, a_data, i);
-        let y = load_f64(compiler, b_data, i);
+        let x = load_as_f64(compiler, a_data, i, a_dtype);
+        let y = load_as_f64(compiler, b_data, i, b_dtype);
         let prod = compiler.builder.build_float_mul(x, y, "prod").unwrap();
         let cur = compiler
             .builder
@@ -960,46 +1177,6 @@ pub fn dot<'ctx>(
         compiler.builder.build_store(acc_ptr, next).unwrap();
         Ok(())
     })?;
-
-    let result = compiler
-        .builder
-        .build_load(f64_type, acc_ptr, "acc_final")
-        .unwrap()
-        .into_float_value();
-    Ok(compiler.create_pyobject_float(result))
-}
-
-/// `arr.prod()` — product of all elements as a scalar float PyObject.
-pub fn reduce_prod<'ctx>(
-    compiler: &mut Compiler<'ctx>,
-    arr_obj: IntValue<'ctx>,
-) -> Result<IntValue<'ctx>, CodeGenError> {
-    let f64_type = compiler.context.f64_type();
-    let base = compiler.extract_array_ptr(arr_obj);
-    let len = array_len(compiler, base);
-    let data = data_ptr(compiler, base);
-
-    let acc_ptr = compiler.builder.build_alloca(f64_type, "acc").unwrap();
-    compiler
-        .builder
-        .build_store(acc_ptr, f64_type.const_float(1.0))
-        .unwrap();
-
-    emit_counted_loop(compiler, len, |compiler, i| {
-        let cur = compiler
-            .builder
-            .build_load(compiler.context.f64_type(), acc_ptr, "acc_cur")
-            .unwrap()
-            .into_float_value();
-        let elem = load_f64(compiler, data, i);
-        let next = compiler
-            .builder
-            .build_float_mul(cur, elem, "acc_next")
-            .unwrap();
-        compiler.builder.build_store(acc_ptr, next).unwrap();
-        Ok(())
-    })?;
-
     let result = compiler
         .builder
         .build_load(f64_type, acc_ptr, "acc_final")

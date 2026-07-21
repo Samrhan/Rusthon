@@ -3,33 +3,65 @@
 //! Rusthon represents every value as one NaN-boxed `i64`, so an ndarray passed
 //! to — or returned from — a function is already carried correctly at runtime.
 //! The only thing missing across a function boundary is the *compile-time*
-//! knowledge that a value might be an array, which is what gates the array code
-//! paths (see [`Compiler::expr_may_be_array`]). Within a single function codegen
-//! tracks this flow-sensitively; this module propagates the same fact *between*
-//! functions so arrays can flow through parameters and return values.
+//! knowledge that a value is an array **and of which dtype**, which gates the
+//! array code paths (see [`Compiler::expr_may_be_array`]) and picks int-vs-float
+//! storage. Within a single function codegen tracks this flow-sensitively; this
+//! module propagates the same facts *between* functions so arrays flow through
+//! parameters and return values.
 //!
-//! It computes two facts with a monotonic fixpoint:
-//! - [`ArraynessInfo::array_returning`]: functions that may return an array.
-//! - [`ArraynessInfo::array_params`]: for each function, which parameters may
-//!   receive an array.
-//!
-//! The analysis is a sound over-approximation: it must flag *every* value that
-//! could be an array (a miss would miscompile array code), while a spurious flag
-//! only costs an unnecessary — but still correct — runtime array dispatch.
+//! Because an `int64` array stores raw `i64` bytes and a `float64` array raw
+//! `f64` bytes, the dtype **must** be known statically (reading one as the other
+//! reinterprets bytes). Where the dtype cannot be pinned down (e.g. a function
+//! returns an int array on one path and a float array on another) it becomes
+//! [`ArrayDtype::Unknown`], and codegen reports an error rather than guess.
 //!
 //! [`Compiler::expr_may_be_array`]: crate::codegen::Compiler::expr_may_be_array
 
 use crate::ast::{BinOp, IRExpr, IRStmt};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// NumPy constructor functions that build a fresh array.
 const NUMPY_CONSTRUCTORS: &[&str] = &["array", "zeros", "ones", "arange"];
 
 /// Element-wise unary math functions (ufuncs). Each maps an array to a new
-/// array, so — like constructors — a call to one yields an array. The codegen
-/// mapping to LLVM intrinsics lives in `generators::ndarray::ufunc_intrinsic`;
-/// the two lists are kept in sync by `test_ufunc_tables_agree`.
+/// (always `float64`) array. The codegen mapping to LLVM intrinsics lives in
+/// `generators::ndarray::ufunc_intrinsic`; the two lists are kept in sync by
+/// `test_ufunc_tables_agree`.
 pub const NUMPY_UFUNCS: &[&str] = &["sqrt", "abs", "exp", "log", "sin", "cos", "floor", "ceil"];
+
+/// The element type of an array (or the type produced by a numeric operation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrayDtype {
+    /// 64-bit signed integer elements.
+    Int,
+    /// 64-bit IEEE-754 float elements.
+    Float,
+    /// Statically indeterminate (e.g. conflicting dtypes merged across paths).
+    Unknown,
+}
+
+impl ArrayDtype {
+    /// NumPy-style promotion for a binary op: `int op int` stays `int`, anything
+    /// touching `float` becomes `float`, and `Unknown` is contagious.
+    pub fn promote(self, other: ArrayDtype) -> ArrayDtype {
+        use ArrayDtype::*;
+        match (self, other) {
+            (Unknown, _) | (_, Unknown) => Unknown,
+            (Int, Int) => Int,
+            _ => Float,
+        }
+    }
+
+    /// Merge of the *same* value's dtype seen along different paths/call sites:
+    /// equal dtypes stay, disagreement collapses to `Unknown`.
+    pub fn merge(self, other: ArrayDtype) -> ArrayDtype {
+        if self == other {
+            self
+        } else {
+            ArrayDtype::Unknown
+        }
+    }
+}
 
 /// Whether `func` is a NumPy array constructor (`array`/`zeros`/`ones`/`arange`).
 pub fn is_numpy_constructor(func: &str) -> bool {
@@ -41,54 +73,79 @@ pub fn is_numpy_ufunc(func: &str) -> bool {
     NUMPY_UFUNCS.contains(&func)
 }
 
-/// Whether a `numpy.<func>(args)` call evaluates to an array, given a predicate
-/// that reports whether each argument may be an array.
+/// The dtype of a `numpy.<func>(args)` call's result, or `None` if it is not an
+/// array (reductions, `dot`, constants).
 ///
-/// This is the single source of truth shared by the interprocedural analysis
-/// ([`expr_is_array`]) and codegen ([`Compiler::expr_may_be_array`]):
-/// - constructors always yield an array;
-/// - a ufunc mirrors its argument (`np.sqrt(arr)` is an array, `np.sqrt(x)` a
-///   scalar), exactly like NumPy;
-/// - reductions (`sum`/`mean`/`max`/`min`/`prod`/`dot`) and constants
-///   (`pi`/`e`) yield scalars.
+/// - `array([literals])`: `Int` if every element is an integer literal, else
+///   `Float`; a non-literal argument defaults to `Float`.
+/// - `zeros`/`ones`: `Float`; `arange`: `Int` (matching NumPy).
+/// - ufuncs mirror the *array-ness* of their argument and always yield `Float`.
 ///
-/// [`Compiler::expr_may_be_array`]: crate::codegen::Compiler::expr_may_be_array
-pub fn numpy_call_returns_array(
+/// Single source of truth shared by the analysis and codegen.
+pub fn numpy_call_dtype(
     func: &str,
     args: &[IRExpr],
-    arg_is_array: impl Fn(&IRExpr) -> bool,
-) -> bool {
+    arg_dtype: impl Fn(&IRExpr) -> Option<ArrayDtype>,
+) -> Option<ArrayDtype> {
     if is_numpy_constructor(func) {
-        return true;
+        return Some(match func {
+            "arange" => ArrayDtype::Int,
+            "array" => array_literal_dtype(args.first()),
+            _ => ArrayDtype::Float, // zeros, ones
+        });
     }
     if is_numpy_ufunc(func) {
-        return args.first().is_some_and(arg_is_array);
+        return args.first().and_then(&arg_dtype).map(|_| ArrayDtype::Float);
     }
-    false
+    None
+}
+
+/// Infers the dtype of `np.array(arg)` from its literal argument.
+fn array_literal_dtype(arg: Option<&IRExpr>) -> ArrayDtype {
+    match arg {
+        Some(IRExpr::List(elts)) if elts.iter().all(is_int_literal) => ArrayDtype::Int,
+        _ => ArrayDtype::Float,
+    }
+}
+
+/// Whether an expression is an integer-typed literal (`int` or `bool`).
+fn is_int_literal(expr: &IRExpr) -> bool {
+    matches!(expr, IRExpr::Constant(_) | IRExpr::Bool(_))
+}
+
+/// The dtype a *scalar* operand contributes to promotion. Integer literals count
+/// as `Int`; anything whose scalar type we don't track is treated as `Float`
+/// (safe: it only ever promotes a result towards float, never mis-reads storage).
+fn scalar_operand_dtype(expr: &IRExpr) -> ArrayDtype {
+    match expr {
+        IRExpr::Constant(_) | IRExpr::Bool(_) | IRExpr::Len(_) => ArrayDtype::Int,
+        _ => ArrayDtype::Float,
+    }
 }
 
 /// Interprocedural arrayness facts for a program.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ArraynessInfo {
-    /// Names of functions that may return an array.
-    pub array_returning: HashSet<String>,
-    /// For each function name, one flag per parameter: may it receive an array?
-    pub array_params: HashMap<String, Vec<bool>>,
+    /// For each array-returning function, the dtype of the returned array.
+    pub array_returning: HashMap<String, ArrayDtype>,
+    /// For each function name, one entry per parameter: `Some(dtype)` if the
+    /// parameter may receive an array of that dtype, `None` if it is scalar.
+    pub array_params: HashMap<String, Vec<Option<ArrayDtype>>>,
 }
 
 impl ArraynessInfo {
-    /// Whether a call to `func` might yield an array.
-    pub fn call_returns_array(&self, func: &str) -> bool {
-        self.array_returning.contains(func)
+    /// The dtype of the array `func` returns, if it returns one.
+    pub fn return_dtype(&self, func: &str) -> Option<ArrayDtype> {
+        self.array_returning.get(func).copied()
     }
 
-    /// Whether parameter `index` of `func` might receive an array.
-    pub fn param_is_array(&self, func: &str, index: usize) -> bool {
+    /// The dtype of the array parameter `index` of `func`, if it is an array.
+    pub fn param_dtype(&self, func: &str, index: usize) -> Option<ArrayDtype> {
         self.array_params
             .get(func)
             .and_then(|flags| flags.get(index))
             .copied()
-            .unwrap_or(false)
+            .flatten()
     }
 }
 
@@ -100,7 +157,10 @@ struct FnDef<'a> {
     body: &'a [IRStmt],
 }
 
-/// Computes the arrayness facts for a whole program.
+/// A map from local variable name to the dtype of the array it may hold.
+type Ctx = HashMap<String, ArrayDtype>;
+
+/// Computes the arrayness (and dtype) facts for a whole program.
 pub fn analyze(program: &[IRStmt]) -> ArraynessInfo {
     let functions: Vec<FnDef> = program
         .iter()
@@ -123,7 +183,7 @@ pub fn analyze(program: &[IRStmt]) -> ArraynessInfo {
     let mut info = ArraynessInfo::default();
     for f in &functions {
         info.array_params
-            .insert(f.name.to_string(), vec![false; f.params.len()]);
+            .insert(f.name.to_string(), vec![None; f.params.len()]);
     }
 
     // Monotonic fixpoint: each pass reads the previous iteration's facts
@@ -135,17 +195,17 @@ pub fn analyze(program: &[IRStmt]) -> ArraynessInfo {
             // A default value can itself make a parameter array-typed.
             for (i, default) in f.defaults.iter().enumerate() {
                 if let Some(default) = default {
-                    if expr_is_array(default, &HashSet::new(), &prev) {
-                        mark_param(&mut info, f.name, i);
+                    if let Some(dt) = expr_array_dtype(default, &Ctx::new(), &prev) {
+                        mark_param(&mut info, f.name, i, dt);
                     }
                 }
             }
 
             // Walk the body with parameters seeded from what callers pass in.
-            let mut ctx: HashSet<String> = HashSet::new();
+            let mut ctx = Ctx::new();
             for (i, param) in f.params.iter().enumerate() {
-                if prev.param_is_array(f.name, i) {
-                    ctx.insert(param.clone());
+                if let Some(dt) = prev.param_dtype(f.name, i) {
+                    ctx.insert(param.clone(), dt);
                 }
             }
             analyze_block(f.body, &mut ctx, Some(f.name), &prev, &mut info);
@@ -153,7 +213,7 @@ pub fn analyze(program: &[IRStmt]) -> ArraynessInfo {
 
         // Top-level statements: their calls also constrain callee parameters.
         // Nested `FunctionDef`s are skipped here (analyzed above).
-        let mut ctx = HashSet::new();
+        let mut ctx = Ctx::new();
         analyze_block(program, &mut ctx, None, &prev, &mut info);
 
         if info == prev {
@@ -164,19 +224,32 @@ pub fn analyze(program: &[IRStmt]) -> ArraynessInfo {
     info
 }
 
-/// Marks parameter `index` of `func` as possibly array-typed.
-fn mark_param(info: &mut ArraynessInfo, func: &str, index: usize) {
+/// Records that parameter `index` of `func` may receive an array of `dtype`,
+/// merging with any dtype seen at other call sites.
+fn mark_param(info: &mut ArraynessInfo, func: &str, index: usize, dtype: ArrayDtype) {
     if let Some(flags) = info.array_params.get_mut(func) {
         if let Some(slot) = flags.get_mut(index) {
-            *slot = true;
+            *slot = Some(match *slot {
+                Some(existing) => existing.merge(dtype),
+                None => dtype,
+            });
         }
     }
+}
+
+/// Records that `func` may return an array of `dtype`, merging across returns.
+fn mark_return(info: &mut ArraynessInfo, func: &str, dtype: ArrayDtype) {
+    let entry = info
+        .array_returning
+        .entry(func.to_string())
+        .or_insert(dtype);
+    *entry = entry.merge(dtype);
 }
 
 /// Walks a block, growing `ctx` (locals that may be arrays) and recording facts.
 fn analyze_block(
     stmts: &[IRStmt],
-    ctx: &mut HashSet<String>,
+    ctx: &mut Ctx,
     current_fn: Option<&str>,
     prev: &ArraynessInfo,
     info: &mut ArraynessInfo,
@@ -186,10 +259,10 @@ fn analyze_block(
             IRStmt::Assign { target, value } => {
                 analyze_expr(value, ctx, prev, info);
                 // Grow-only within a function: once a name may be an array we
-                // keep treating it as such. This is a sound over-approximation
-                // that makes control flow trivial to handle.
-                if expr_is_array(value, ctx, prev) {
-                    ctx.insert(target.clone());
+                // keep treating it as such, merging dtypes seen along the way.
+                if let Some(dt) = expr_array_dtype(value, ctx, prev) {
+                    let merged = ctx.get(target).map_or(dt, |old| old.merge(dt));
+                    ctx.insert(target.clone(), merged);
                 }
             }
             IRStmt::IndexAssign {
@@ -210,8 +283,8 @@ fn analyze_block(
             IRStmt::Return(value) => {
                 analyze_expr(value, ctx, prev, info);
                 if let Some(f) = current_fn {
-                    if expr_is_array(value, ctx, prev) {
-                        info.array_returning.insert(f.to_string());
+                    if let Some(dt) = expr_array_dtype(value, ctx, prev) {
+                        mark_return(info, f, dt);
                     }
                 }
             }
@@ -241,19 +314,14 @@ fn analyze_block(
     }
 }
 
-/// Recurses through an expression, recording which call arguments may be arrays.
-fn analyze_expr(
-    expr: &IRExpr,
-    ctx: &HashSet<String>,
-    prev: &ArraynessInfo,
-    info: &mut ArraynessInfo,
-) {
+/// Recurses through an expression, recording the dtypes of array call arguments.
+fn analyze_expr(expr: &IRExpr, ctx: &Ctx, prev: &ArraynessInfo, info: &mut ArraynessInfo) {
     match expr {
         IRExpr::Call { func, args } => {
             for (i, arg) in args.iter().enumerate() {
                 analyze_expr(arg, ctx, prev, info);
-                if expr_is_array(arg, ctx, prev) {
-                    mark_param(info, func, i);
+                if let Some(dt) = expr_array_dtype(arg, ctx, prev) {
+                    mark_param(info, func, i, dt);
                 }
             }
         }
@@ -306,26 +374,54 @@ fn analyze_expr(
     }
 }
 
-/// Whether `expr` may evaluate to an array, given the local array set `ctx` and
-/// the interprocedural facts collected so far. Mirrors
-/// [`Compiler::expr_may_be_array`], extended with the cross-function facts.
+/// The dtype of the array `expr` evaluates to, or `None` if it is not an array.
+/// Mirrors [`Compiler::expr_array_dtype`], extended with cross-function facts.
 ///
-/// [`Compiler::expr_may_be_array`]: crate::codegen::Compiler::expr_may_be_array
-fn expr_is_array(expr: &IRExpr, ctx: &HashSet<String>, info: &ArraynessInfo) -> bool {
+/// [`Compiler::expr_array_dtype`]: crate::codegen::Compiler::expr_array_dtype
+fn expr_array_dtype(expr: &IRExpr, ctx: &Ctx, info: &ArraynessInfo) -> Option<ArrayDtype> {
     match expr {
-        IRExpr::ModuleCall { module, func, args } => {
-            module == "numpy"
-                && numpy_call_returns_array(func, args, |a| expr_is_array(a, ctx, info))
+        IRExpr::ModuleCall { module, func, args } if module == "numpy" => {
+            numpy_call_dtype(func, args, |a| expr_array_dtype(a, ctx, info))
         }
-        IRExpr::Slice { .. } => true,
-        IRExpr::BinaryOp { op, left, right } => {
-            matches!(
+        IRExpr::Slice { value, .. } => expr_array_dtype(value, ctx, info),
+        IRExpr::BinaryOp { op, left, right }
+            if matches!(
                 op,
                 BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
-            ) && (expr_is_array(left, ctx, info) || expr_is_array(right, ctx, info))
+            ) =>
+        {
+            binop_result_dtype(op, left, right, |e| expr_array_dtype(e, ctx, info))
         }
-        IRExpr::Variable(name) => ctx.contains(name),
-        IRExpr::Call { func, .. } => info.call_returns_array(func),
-        _ => false,
+        IRExpr::Variable(name) => ctx.get(name).copied(),
+        IRExpr::Call { func, .. } => info.return_dtype(func),
+        _ => None,
     }
+}
+
+/// The dtype of an element-wise `left op right` where at least one operand may
+/// be an array, or `None` if neither operand is an array.
+pub fn binop_result_dtype(
+    op: &BinOp,
+    left: &IRExpr,
+    right: &IRExpr,
+    arg_dtype: impl Fn(&IRExpr) -> Option<ArrayDtype>,
+) -> Option<ArrayDtype> {
+    let ld = arg_dtype(left);
+    let rd = arg_dtype(right);
+    if ld.is_none() && rd.is_none() {
+        return None; // scalar op scalar — not an array
+    }
+    // True division always yields float, even for int operands (NumPy `/`).
+    if matches!(op, BinOp::Div) {
+        return Some(
+            if ld == Some(ArrayDtype::Unknown) || rd == Some(ArrayDtype::Unknown) {
+                ArrayDtype::Unknown
+            } else {
+                ArrayDtype::Float
+            },
+        );
+    }
+    let left_dt = ld.unwrap_or_else(|| scalar_operand_dtype(left));
+    let right_dt = rd.unwrap_or_else(|| scalar_operand_dtype(right));
+    Some(left_dt.promote(right_dt))
 }

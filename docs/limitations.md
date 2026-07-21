@@ -413,10 +413,14 @@ print(np.dot(a, a), a.prod())    # dot product & product reduction
 def scale(v): return v * 2       # arrays through user functions (params & returns)
 print(scale(a).sum())
 
+# ✅ Also supported: int64 arrays with NumPy dtype promotion
+i = np.arange(4)                 # int64: [0 1 2 3]
+print(i + 1, i / 2)              # int stays int; `/` promotes to float
+
 # ❌ Not supported yet
 m = np.array([[1.0, 2.0]])       # multi-dimensional arrays
 a[0:2] = b                       # slice assignment
-x = np.int64                     # dtypes other than float64
+x = np.array([1], dtype=...)     # explicit dtype= / dtypes beyond int64/float64
 ```
 
 ### Error Handling

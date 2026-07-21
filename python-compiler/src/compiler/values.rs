@@ -399,23 +399,39 @@ impl<'ctx> ValueManager<'ctx> {
             .into_int_value()
     }
 
-    /// Checks if a PyObject is an ndarray.
+    /// Extracts the raw `i64` value from a NaN-boxed integer PyObject.
     ///
-    /// Arrays and lists share the pointer-in-payload shape and differ only by
-    /// tag, so this compares the full NaN + tag bits directly. It is a small,
-    /// self-contained test emitted only where array handling is needed, which
-    /// keeps `extract_tag` (used pervasively) untouched by array support.
-    pub fn is_array(&self, builder: &Builder<'ctx>, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
-        // (pyobject & (QNAN | TAG_MASK)) == (QNAN | (TAG_ARRAY << 48))
-        let mask = self.context.i64_type().const_int(QNAN | TAG_MASK, false);
-        let expected = self
-            .context
-            .i64_type()
-            .const_int(QNAN | (TAG_ARRAY << 48), false);
-        let masked = builder.build_and(pyobject, mask, "array_tag_bits").unwrap();
+    /// Unlike [`extract_payload`], which converts through `f64` (lossy beyond
+    /// 2^52), this recovers the exact 48-bit signed integer sign-extended to 64
+    /// bits. Used for `int64` array elements and integer indices.
+    ///
+    /// [`extract_payload`]: Self::extract_payload
+    pub fn extract_int(&self, builder: &Builder<'ctx>, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
+        let i64_type = self.context.i64_type();
+        let payload_mask = i64_type.const_int(PAYLOAD_MASK, false);
+        let payload = builder
+            .build_and(pyobject, payload_mask, "int_payload")
+            .unwrap();
+        // Sign-extend from bit 47.
+        let sign_bit = builder
+            .build_right_shift(payload, i64_type.const_int(47, false), false, "sign_bit")
+            .unwrap();
+        let is_negative = builder
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                sign_bit,
+                i64_type.const_int(1, false),
+                "is_negative",
+            )
+            .unwrap();
+        let sign_extension = i64_type.const_int(!PAYLOAD_MASK, false);
+        let extended = builder
+            .build_or(payload, sign_extension, "sign_extend")
+            .unwrap();
         builder
-            .build_int_compare(inkwell::IntPredicate::EQ, masked, expected, "is_array")
+            .build_select(is_negative, extended, payload, "signed_int")
             .unwrap()
+            .into_int_value()
     }
 
     /// Checks if a PyObject is a float (not NaN-boxed)

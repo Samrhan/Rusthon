@@ -46,12 +46,13 @@ pub fn compile_print<'ctx>(
         for (i, expr) in exprs.iter().enumerate() {
             let is_last = i == exprs.len() - 1;
 
-            // Arrays print as `[e0 e1 ...]`; everything else via the scalar
-            // dispatcher. Gating on `expr_may_be_array` keeps scalar prints
-            // (and their snapshots) unchanged.
+            // Arrays print as `[e0 e1 ...]` (formatted per dtype); everything
+            // else via the scalar dispatcher. Gating on `expr_may_be_array`
+            // keeps scalar prints (and their snapshots) unchanged.
             if compiler.expr_may_be_array(expr) {
+                let dtype = compiler.require_known_array_dtype(expr)?;
                 let value = compiler.compile_expression(expr)?;
-                ndarray::print_array(compiler, value, is_last);
+                ndarray::print_array(compiler, value, dtype, is_last);
             } else {
                 let value = compiler.compile_expression(expr)?;
                 // Print the value (with newline only for the last one)
@@ -85,10 +86,10 @@ pub fn compile_assign<'ctx>(
     value: &IRExpr,
     current_fn: FunctionValue<'ctx>,
 ) -> Result<(), CodeGenError> {
-    // Track (conservatively) whether this variable may now hold an array, so
-    // later uses know whether to emit array-aware code. Computed on the IR
-    // before lowering to LLVM, using the arrayness of variables assigned so far.
-    let may_be_array = compiler.expr_may_be_array(value);
+    // Track (conservatively) whether this variable may now hold an array, and
+    // of which dtype, so later uses emit the right array-aware code. Computed on
+    // the IR using the arrayness of variables assigned so far.
+    let dtype = compiler.expr_array_dtype(value);
 
     let value = compiler.compile_expression(value)?;
     let ptr = compiler.variables.get(target).copied().unwrap_or_else(|| {
@@ -98,10 +99,13 @@ pub fn compile_assign<'ctx>(
     });
     compiler.builder.build_store(ptr, value).unwrap();
 
-    if may_be_array {
-        compiler.maybe_array_vars.insert(target.to_string());
-    } else {
-        compiler.maybe_array_vars.remove(target);
+    match dtype {
+        Some(dt) => {
+            compiler.array_vars.insert(target.to_string(), dt);
+        }
+        None => {
+            compiler.array_vars.remove(target);
+        }
     }
     Ok(())
 }
@@ -117,13 +121,14 @@ pub fn compile_index_assign<'ctx>(
     index: &IRExpr,
     value: &IRExpr,
 ) -> Result<(), CodeGenError> {
-    let is_array = compiler.expr_may_be_array(target);
+    let array_dtype = compiler.expr_array_dtype(target);
     let obj = compiler.compile_expression(target)?;
     let index_obj = compiler.compile_expression(index)?;
     let value_obj = compiler.compile_expression(value)?;
 
-    if is_array {
-        ndarray::store_index(compiler, obj, index_obj, value_obj);
+    if array_dtype.is_some() {
+        let dtype = compiler.require_known_array_dtype(target)?;
+        ndarray::store_index(compiler, obj, index_obj, value_obj, dtype);
         return Ok(());
     }
 

@@ -66,7 +66,7 @@ Python Source → Parser → AST → Lowering → IR → CodeGen → LLVM IR →
   - `compiler/generators/expression.rs` — expression compilation
   - `compiler/generators/statement.rs` — statement compilation
   - `compiler/generators/module.rs` — module/method/attribute dispatch (e.g. `np.array`, `arr.sum()`)
-  - `compiler/generators/ndarray.rs` — NumPy `ndarray` codegen (unboxed float64 buffers, element-wise loops)
+  - `compiler/generators/ndarray.rs` — NumPy `ndarray` codegen (unboxed int64/float64 buffers, dtype-aware element-wise loops)
 
 #### 4. **Optimization** (LLVM 18 new pass manager)
 - Pipeline: `default<O2>`
@@ -148,7 +148,7 @@ Value:   3         10          20          30
 | `lowering.rs` | AST → IR | `lower_program()`, `lower_statement()`, `lower_expression()` |
 | `codegen.rs` | Compilation driver | `Compiler`, `compile_program()`, two-pass orchestration |
 | `compiler/mod.rs` | Codegen submodule root | Re-exports arrayness/generators/runtime/values |
-| `compiler/arrayness.rs` | Interprocedural arrayness analysis | `analyze`, `ArraynessInfo` (arrays through function params/returns) |
+| `compiler/arrayness.rs` | Interprocedural arrayness + dtype analysis | `analyze`, `ArraynessInfo`, `ArrayDtype` (int/float arrays through function params/returns) |
 | `compiler/values.rs` | NaN-boxing value system | `ValueManager`, type tags & constants |
 | `compiler/runtime.rs` | Runtime intrinsics | `Runtime`, `FormatStrings` (printf/scanf/malloc/…) |
 | `compiler/generators/expression.rs` | Expression codegen | `compile_binary_op`, `compile_comparison`, list/index/len/call helpers |
@@ -176,13 +176,13 @@ Value:   3         10          20          30
 | `integration.rs` | End-to-end scenarios | 4 |
 | `lists.rs` | List operations | 6 |
 | `minimal_test.rs` | Smoke test | 1 |
-| `numpy.rs` | NumPy subset (arrays, module system) | 26 |
+| `numpy.rs` | NumPy subset (arrays, dtypes, module system) | 30 |
 | `precedence.rs` | Operator precedence | 18 |
 | `strings.rs` | String operations | 28 |
 | `unary.rs` | Unary operators | 15 |
 | `variables.rs` | Variable assignment | 3 |
 
-**Total**: 210 tests
+**Total**: 214 tests
 
 ### Documentation (`docs/`)
 

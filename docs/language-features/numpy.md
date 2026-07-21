@@ -28,7 +28,38 @@ o = np.ones(4)                        # [1.0, 1.0, 1.0, 1.0]
 r = np.arange(5)                      # [0.0, 1.0, 2.0, 3.0, 4.0]
 ```
 
-All arrays are 1-dimensional and hold `float64` elements.
+All arrays are 1-dimensional.
+
+## dtypes (`int64` / `float64`)
+
+Arrays are either `int64` or `float64`, inferred the way NumPy does:
+
+```python
+import numpy as np
+
+i = np.array([1, 2, 3])     # int64  -> prints [1 2 3]
+f = np.array([1.0, 2.0])    # float64 -> prints [1.000000 2.000000]
+r = np.arange(5)            # int64   (like NumPy)
+z = np.zeros(3)             # float64
+```
+
+Arithmetic **promotes** like NumPy: `int op int` stays int, mixing a float makes
+the result float, and true division `/` is always float:
+
+```python
+a = np.arange(4)            # int64
+print(a + 1)                # [1 2 3 4]        (int)
+print(a * a)                # [0 1 4 9]        (int)
+print(a / 2)                # [0. 0.5 1. 1.5]  (float — true division)
+print(a + 0.5)              # [0.5 1.5 2.5 3.5](float — promoted)
+print(a.sum())              # 6               (int)
+print(a.mean())             # 1.5             (float)
+print(np.sqrt(a))           # float           (ufuncs always return float)
+```
+
+The dtype is resolved at compile time (including across function boundaries), so
+int and float arrays generate separate, fast code. A value that is an int array
+on one path and a float array on another (indeterminate dtype) is not supported.
 
 ## Element-wise arithmetic and broadcasting
 
@@ -157,7 +188,8 @@ print(np.e)      # 2.718281...
 
 The subset keeps growing. Not yet supported:
 
-- **dtypes other than `float64`** — every array is `float64`.
+- **dtypes other than `int64`/`float64`** (e.g. `bool`, `float32`), and an
+  explicit `dtype=` argument.
 - **Multiple dimensions** — arrays are 1-D (the header already carries `ndim`
   so this can grow without a layout change).
 - **Slice assignment** (`a[1:3] = ...`), fancy/boolean indexing, negative

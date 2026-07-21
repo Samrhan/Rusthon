@@ -125,11 +125,23 @@ Unary ufuncs (`sqrt`/`abs`/`exp`/`log`/`sin`/`cos`/`floor`/`ceil`) lower to
 LLVM intrinsics and vectorize; they mirror their argument (array→array,
 scalar→scalar). Plus `np.dot` and `prod`.
 
+**Phase 5 — int64 dtype & promotion** ✅ Done
+```python
+import numpy as np
+a = np.arange(4)          # int64: [0 1 2 3]
+print(a + 1, a * a)       # int stays int
+print(a / 2, a.mean())    # `/` and mean promote to float
+```
+Arrays are `int64` or `float64`; the dtype is carried in the header and tracked
+at compile time (including through functions), so int and float arrays get
+separate fast code with NumPy-style promotion. `ArrayDtype::Unknown` (a value
+that is int on one path, float on another) is a compile-time error.
+
 **Next phases** 🔮 Planned
-- Additional dtypes (`int64`) tracked in the array header.
 - Boolean/fancy indexing, negative indices, slice assignment (`a[i:j] = ...`).
 - Multi-dimensional arrays (`ndim`/shape/strides), `reshape`, `.T`, `@` matmul.
 - More ufuncs/reductions (`np.tanh`, `np.power`, `np.std`, `np.cumsum`, …).
+- An explicit `dtype=` argument and more dtypes (`bool`, `float32`).
 
 ### Data Structures
 

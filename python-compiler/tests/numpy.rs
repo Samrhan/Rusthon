@@ -193,19 +193,33 @@ print(add(2, 3))
     let ir = lowering::lower_program(&ast).unwrap();
     let info = compiler::arrayness::analyze(&ir);
 
-    // `scale(v, k)` returns `v * k` with an array `v` → returns an array.
-    assert!(info.call_returns_array("scale"), "scale returns an array");
-    assert!(info.param_is_array("scale", 0), "scale.v may be an array");
-    assert!(!info.param_is_array("scale", 1), "scale.k is scalar");
+    use compiler::arrayness::ArrayDtype::Float;
+
+    // `scale(v, k)` returns `v * k` with a float array `v` → returns a float array.
+    assert_eq!(
+        info.return_dtype("scale"),
+        Some(Float),
+        "scale returns an array"
+    );
+    assert_eq!(
+        info.param_dtype("scale", 0),
+        Some(Float),
+        "scale.v is an array"
+    );
+    assert_eq!(info.param_dtype("scale", 1), None, "scale.k is scalar");
 
     // `total(v)` returns `v.sum()` → a scalar, but takes an array parameter.
-    assert!(!info.call_returns_array("total"), "total returns a scalar");
-    assert!(info.param_is_array("total", 0), "total.v may be an array");
+    assert_eq!(info.return_dtype("total"), None, "total returns a scalar");
+    assert_eq!(
+        info.param_dtype("total", 0),
+        Some(Float),
+        "total.v is an array"
+    );
 
     // `add` is only ever called with scalars → untouched.
-    assert!(!info.call_returns_array("add"), "add returns a scalar");
-    assert!(!info.param_is_array("add", 0), "add.a is scalar");
-    assert!(!info.param_is_array("add", 1), "add.b is scalar");
+    assert_eq!(info.return_dtype("add"), None, "add returns a scalar");
+    assert_eq!(info.param_dtype("add", 0), None, "add.a is scalar");
+    assert_eq!(info.param_dtype("add", 1), None, "add.b is scalar");
 }
 
 #[test]
@@ -231,14 +245,17 @@ print(r.sum())
     let ir = lowering::lower_program(&ast).unwrap();
     let info = compiler::arrayness::analyze(&ir);
 
-    // Arrayness propagates transitively: make -> double -> make_doubled.
-    assert!(info.call_returns_array("make"));
-    assert!(info.call_returns_array("double"));
-    assert!(info.call_returns_array("make_doubled"));
-    assert!(info.param_is_array("double", 0));
-    // And through recursion: grow takes and returns an array.
-    assert!(info.param_is_array("grow", 0));
-    assert!(info.call_returns_array("grow"));
+    use compiler::arrayness::ArrayDtype::{Float, Int};
+
+    // Arrayness (and dtype) propagates transitively: make -> double -> make_doubled.
+    // `np.arange` is int; `double(v) = v * 2` keeps int (int * int literal).
+    assert_eq!(info.return_dtype("make"), Some(Int));
+    assert_eq!(info.return_dtype("double"), Some(Int));
+    assert_eq!(info.return_dtype("make_doubled"), Some(Int));
+    assert_eq!(info.param_dtype("double", 0), Some(Int));
+    // And through recursion: grow takes and returns a float array (np.zeros).
+    assert_eq!(info.param_dtype("grow", 0), Some(Float));
+    assert_eq!(info.return_dtype("grow"), Some(Float));
 }
 
 #[test]
@@ -254,22 +271,43 @@ fn test_ufunc_tables_agree() {
 }
 
 #[test]
-fn test_numpy_call_arrayness() {
-    // Constructors always yield arrays; a ufunc mirrors its argument;
-    // reductions and dot yield scalars.
-    use compiler::arrayness::numpy_call_returns_array as returns_array;
-    let arg = [ast::IRExpr::Float(1.0)];
-    assert!(returns_array("zeros", &[], |_| false), "zeros -> array");
-    assert!(
-        returns_array("sqrt", &arg, |_| true),
-        "sqrt(array) -> array"
+fn test_numpy_call_dtype() {
+    // Constructors yield arrays with a dtype; a ufunc mirrors its argument
+    // (always float); reductions and dot yield scalars (None).
+    use compiler::arrayness::{numpy_call_dtype, ArrayDtype};
+    let arr = [ast::IRExpr::Float(1.0)];
+    let int_list = [ast::IRExpr::List(vec![ast::IRExpr::Constant(1)])];
+    let float_list = [ast::IRExpr::List(vec![ast::IRExpr::Float(1.0)])];
+    assert_eq!(
+        numpy_call_dtype("zeros", &[], |_| None),
+        Some(ArrayDtype::Float)
     );
-    assert!(
-        !returns_array("sqrt", &arg, |_| false),
-        "sqrt(scalar) -> scalar"
+    assert_eq!(
+        numpy_call_dtype("arange", &[], |_| None),
+        Some(ArrayDtype::Int)
     );
-    assert!(!returns_array("sum", &arg, |_| true), "sum -> scalar");
-    assert!(!returns_array("dot", &arg, |_| true), "dot -> scalar");
+    assert_eq!(
+        numpy_call_dtype("array", &int_list, |_| None),
+        Some(ArrayDtype::Int)
+    );
+    assert_eq!(
+        numpy_call_dtype("array", &float_list, |_| None),
+        Some(ArrayDtype::Float)
+    );
+    // sqrt of an array -> float array; of a scalar -> None.
+    assert_eq!(
+        numpy_call_dtype("sqrt", &arr, |_| Some(ArrayDtype::Int)),
+        Some(ArrayDtype::Float)
+    );
+    assert_eq!(numpy_call_dtype("sqrt", &arr, |_| None), None);
+    assert_eq!(
+        numpy_call_dtype("sum", &arr, |_| Some(ArrayDtype::Float)),
+        None
+    );
+    assert_eq!(
+        numpy_call_dtype("dot", &arr, |_| Some(ArrayDtype::Float)),
+        None
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -417,9 +455,91 @@ print(np.exp(np.zeros(3)))
     insta::assert_snapshot!(compile(source));
 }
 
+#[test]
+fn test_int_arrays() {
+    let source = r#"
+import numpy as np
+a = np.array([1, 2, 3, 4])
+r = np.arange(5)
+b = a + 1
+c = a * a
+print(a)
+print(b)
+print(a[2])
+print(a.sum())
+print(a.prod())
+print(a.max())
+print(r.sum())
+a[0] = 100
+print(a)
+print(a[1:3])
+"#;
+    insta::assert_snapshot!(compile(source));
+}
+
+#[test]
+fn test_dtype_promotion() {
+    let source = r#"
+import numpy as np
+a = np.array([1, 2, 3, 4])
+f = np.array([0.5, 0.5, 0.5, 0.5])
+print(a + f)
+print(a / 2)
+print(a.mean())
+print(np.sqrt(a))
+"#;
+    insta::assert_snapshot!(compile(source));
+}
+
 // ---------------------------------------------------------------------------
 // Behavioural invariants
 // ---------------------------------------------------------------------------
+
+#[test]
+fn test_int_program_uses_integer_codegen() {
+    // A program over int arrays must stay in integer arithmetic and storage —
+    // no float ops leak in (that would mean reading int bytes as float).
+    let source = r#"
+import numpy as np
+a = np.arange(4)
+b = a + a
+c = a * b
+print(b)
+print(c.sum())
+print(c.max())
+"#;
+    let ir = compile(source);
+    assert!(ir.contains("store i64"), "int arrays store raw i64:\n{ir}");
+    assert!(
+        !ir.contains("fadd"),
+        "int arithmetic must not use float add:\n{ir}"
+    );
+    assert!(
+        !ir.contains("fmul"),
+        "int arithmetic must not use float mul:\n{ir}"
+    );
+}
+
+#[test]
+fn test_true_division_promotes_to_float() {
+    // NumPy's `/` is true division: int / int yields a float array, so the int
+    // elements are widened (`sitofp`) and the result is summed as floats.
+    let source = r#"
+import numpy as np
+a = np.arange(4)
+d = a / 2
+print(d.sum())
+"#;
+    let ir = compile(source);
+    assert!(
+        ir.contains("sitofp"),
+        "int/int true division must widen elements to float:\n{ir}"
+    );
+    assert!(
+        ir.contains("fadd"),
+        "the resulting float array must be summed with float add:\n{ir}"
+    );
+}
 
 #[test]
 fn test_ufunc_lowers_to_llvm_intrinsic() {

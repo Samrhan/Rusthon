@@ -11,6 +11,7 @@
 
 use crate::ast::IRExpr;
 use crate::codegen::{CodeGenError, Compiler};
+use crate::compiler::arrayness::{self, ArrayDtype};
 use crate::compiler::generators::ndarray;
 use inkwell::values::IntValue;
 
@@ -41,27 +42,29 @@ pub fn compile_method_call<'ctx>(
     method: &str,
     args: &[IRExpr],
 ) -> Result<IntValue<'ctx>, CodeGenError> {
+    // All supported methods are reductions over an array of known dtype.
+    let dtype = compiler.require_known_array_dtype(receiver)?;
     let recv = compiler.compile_expression(receiver)?;
     match method {
         "sum" => {
             expect_argc(method, args, 0)?;
-            ndarray::reduce_sum(compiler, recv)
+            ndarray::reduce_sum(compiler, recv, dtype)
         }
         "mean" => {
             expect_argc(method, args, 0)?;
-            ndarray::mean(compiler, recv)
+            ndarray::mean(compiler, recv, dtype)
         }
         "max" => {
             expect_argc(method, args, 0)?;
-            ndarray::reduce_max(compiler, recv)
+            ndarray::reduce_max(compiler, recv, dtype)
         }
         "min" => {
             expect_argc(method, args, 0)?;
-            ndarray::reduce_min(compiler, recv)
+            ndarray::reduce_min(compiler, recv, dtype)
         }
         "prod" => {
             expect_argc(method, args, 0)?;
-            ndarray::reduce_prod(compiler, recv)
+            ndarray::reduce_prod(compiler, recv, dtype)
         }
         other => Err(CodeGenError::UnsupportedFeature(format!(
             "unknown method '.{other}()'"
@@ -95,11 +98,12 @@ fn compile_numpy_call<'ctx>(
     // choice follows the argument's compile-time arrayness.
     if let Some(intrinsic) = ndarray::ufunc_intrinsic(func) {
         expect_argc(func, args, 1)?;
-        let arg_is_array = compiler.expr_may_be_array(&args[0]);
-        let arg = compiler.compile_expression(&args[0])?;
-        return if arg_is_array {
-            ndarray::unary_map(compiler, arg, intrinsic)
+        return if compiler.expr_may_be_array(&args[0]) {
+            let src_dtype = compiler.require_known_array_dtype(&args[0])?;
+            let arg = compiler.compile_expression(&args[0])?;
+            ndarray::unary_map(compiler, arg, src_dtype, intrinsic)
         } else {
+            let arg = compiler.compile_expression(&args[0])?;
             ndarray::unary_scalar(compiler, arg, intrinsic)
         };
     }
@@ -108,8 +112,11 @@ fn compile_numpy_call<'ctx>(
         // Constructors.
         "array" => {
             expect_argc(func, args, 1)?;
+            let dtype =
+                arrayness::numpy_call_dtype("array", args, |a| compiler.expr_array_dtype(a))
+                    .unwrap_or(ArrayDtype::Float);
             let list = compiler.compile_expression(&args[0])?;
-            ndarray::from_list(compiler, list)
+            ndarray::from_list(compiler, list, dtype)
         }
         "zeros" => {
             expect_argc(func, args, 1)?;
@@ -129,35 +136,42 @@ fn compile_numpy_call<'ctx>(
         // Free-function forms of the reductions: np.sum(a) / np.mean(a).
         "sum" => {
             expect_argc(func, args, 1)?;
+            let dtype = compiler.require_known_array_dtype(&args[0])?;
             let arr = compiler.compile_expression(&args[0])?;
-            ndarray::reduce_sum(compiler, arr)
+            ndarray::reduce_sum(compiler, arr, dtype)
         }
         "mean" => {
             expect_argc(func, args, 1)?;
+            let dtype = compiler.require_known_array_dtype(&args[0])?;
             let arr = compiler.compile_expression(&args[0])?;
-            ndarray::mean(compiler, arr)
+            ndarray::mean(compiler, arr, dtype)
         }
         "max" => {
             expect_argc(func, args, 1)?;
+            let dtype = compiler.require_known_array_dtype(&args[0])?;
             let arr = compiler.compile_expression(&args[0])?;
-            ndarray::reduce_max(compiler, arr)
+            ndarray::reduce_max(compiler, arr, dtype)
         }
         "min" => {
             expect_argc(func, args, 1)?;
+            let dtype = compiler.require_known_array_dtype(&args[0])?;
             let arr = compiler.compile_expression(&args[0])?;
-            ndarray::reduce_min(compiler, arr)
+            ndarray::reduce_min(compiler, arr, dtype)
         }
         "prod" => {
             expect_argc(func, args, 1)?;
+            let dtype = compiler.require_known_array_dtype(&args[0])?;
             let arr = compiler.compile_expression(&args[0])?;
-            ndarray::reduce_prod(compiler, arr)
+            ndarray::reduce_prod(compiler, arr, dtype)
         }
         // Linear algebra: 1-D dot product.
         "dot" => {
             expect_argc(func, args, 2)?;
+            let a_dtype = compiler.require_known_array_dtype(&args[0])?;
+            let b_dtype = compiler.require_known_array_dtype(&args[1])?;
             let a = compiler.compile_expression(&args[0])?;
             let b = compiler.compile_expression(&args[1])?;
-            ndarray::dot(compiler, a, b)
+            ndarray::dot(compiler, a, b, a_dtype, b_dtype)
         }
         // Constants (lowered to zero-argument module calls).
         "pi" => Ok(compiler.create_pyobject_float(
