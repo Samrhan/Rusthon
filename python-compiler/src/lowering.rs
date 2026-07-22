@@ -126,6 +126,25 @@ fn lower_statement(stmt: &ast::Stmt, ctx: &mut LoweringContext) -> Result<IRStmt
                         value,
                     })
                 }
+                // `a, b, ... = value` — tuple unpacking. All targets must be
+                // simple names.
+                ast::Expr::Tuple(ast::ExprTuple { elts, .. }) => {
+                    let mut targets = Vec::with_capacity(elts.len());
+                    for elt in elts {
+                        match elt {
+                            ast::Expr::Name(ast::ExprName { id, .. }) => {
+                                targets.push(id.to_string())
+                            }
+                            _ => {
+                                return Err(LoweringError::UnsupportedStatement(Box::new(
+                                    stmt.clone(),
+                                )))
+                            }
+                        }
+                    }
+                    let value = lower_expression(value, ctx)?;
+                    Ok(IRStmt::Unpack { targets, value })
+                }
                 // `target[index] = value` — item assignment. Slice assignment
                 // (`a[i:j] = ...`) is not supported.
                 ast::Expr::Subscript(ast::ExprSubscript {
@@ -376,6 +395,9 @@ fn lower_expression(expr: &ast::Expr, ctx: &LoweringContext) -> Result<IRExpr, L
         }
         ast::Expr::List(ast::ExprList { elts, .. }) => {
             Ok(IRExpr::List(lower_expressions(elts, ctx)?))
+        }
+        ast::Expr::Tuple(ast::ExprTuple { elts, .. }) => {
+            Ok(IRExpr::Tuple(lower_expressions(elts, ctx)?))
         }
         ast::Expr::Subscript(ast::ExprSubscript { value, slice, .. }) => {
             let base = lower_expression(value, ctx)?;

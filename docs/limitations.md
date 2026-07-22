@@ -49,12 +49,18 @@ my_list.append(4)
 # Use separate variables or simulate with functions
 ```
 
-❌ **Tuples**
+✅ **Tuples** — supported
 ```python
-# Not supported
-my_tuple = (1, 2, 3)
+# ✅ Supported: literals, indexing, len, unpacking, multiple return
+t = (10, 20, 30)
+print(t[0], len(t))          # ✅ Works
+a, b, c = t                  # ✅ Unpacking
 
-# No direct workaround
+def minmax(p, q):
+    return (p, q) if p < q else (q, p)  # ✅ Multiple return values
+lo, hi = minmax(8, 3)
+
+# ⚠️ Immutable: no item assignment; unpack targets must be plain names.
 ```
 
 ❌ **Dictionaries**
@@ -422,7 +428,7 @@ print(m[0, 1], m.T, np.matmul(m, m))
 # ❌ Not supported yet
 t = np.array([[[1.0]]])          # more than 2 dimensions
 m[0, 1] = 9.0                    # 2-D item / slice assignment
-s = m.shape                      # shape / reshape (need tuples)
+s = m.shape                      # shape / reshape (tuples exist; not yet wired)
 x = np.array([1], dtype=...)     # explicit dtype= / dtypes beyond int64/float64
 ```
 

@@ -287,6 +287,7 @@ fn analyze_block(
                 analyze_expr(index, ctx, prev, info);
                 analyze_expr(value, ctx, prev, info);
             }
+            IRStmt::Unpack { value, .. } => analyze_expr(value, ctx, prev, info),
             IRStmt::Print(exprs) => {
                 for e in exprs {
                     analyze_expr(e, ctx, prev, info);
@@ -379,7 +380,7 @@ fn analyze_expr(expr: &IRExpr, ctx: &Ctx, prev: &ArraynessInfo, info: &mut Array
         }
         IRExpr::Attribute { value, .. } => analyze_expr(value, ctx, prev, info),
         IRExpr::Len(e) => analyze_expr(e, ctx, prev, info),
-        IRExpr::List(elts) => {
+        IRExpr::List(elts) | IRExpr::Tuple(elts) => {
             for e in elts {
                 analyze_expr(e, ctx, prev, info);
             }

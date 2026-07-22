@@ -153,6 +153,16 @@ impl<'ctx> Compiler<'ctx> {
         self.values.extract_array_ptr(&self.builder, pyobject)
     }
 
+    /// Creates a PyObject value from a tuple pointer using NaN-boxing.
+    pub(crate) fn create_pyobject_tuple(&self, ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
+        self.values.create_tuple(&self.builder, ptr)
+    }
+
+    /// Checks if a PyObject is a tuple (i1 result).
+    pub(crate) fn is_tuple(&self, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
+        self.values.is_tuple(&self.builder, pyobject)
+    }
+
     /// Reconstructs a PyObject from a tag and payload
     /// tag: IntValue (i64) representing the type tag (0=INT, 1=FLOAT, 2=BOOL, 3=STRING, 4=LIST)
     /// payload: FloatValue representing the payload as f64
@@ -347,6 +357,9 @@ impl<'ctx> Compiler<'ctx> {
                 index,
                 value,
             } => statement::compile_index_assign(self, target, index, value)?,
+            IRStmt::Unpack { targets, value } => {
+                statement::compile_unpack(self, targets, value, current_fn)?
+            }
             IRStmt::ExprStmt(expr) => statement::compile_expr_stmt(self, expr)?,
             IRStmt::Return(expr) => statement::compile_return(self, expr)?,
             IRStmt::FunctionDef { .. } => {
@@ -583,6 +596,7 @@ impl<'ctx> Compiler<'ctx> {
             IRExpr::StringLiteral(s) => expression::compile_string_literal(self, s),
             IRExpr::UnaryOp { op, operand } => expression::compile_unary_op(self, op, operand),
             IRExpr::List(elements) => expression::compile_list(self, elements),
+            IRExpr::Tuple(elements) => expression::compile_tuple(self, elements),
             IRExpr::Index { list, index } => expression::compile_index(self, list, index),
             IRExpr::IndexND { array, indices } => {
                 expression::compile_index_nd(self, array, indices)

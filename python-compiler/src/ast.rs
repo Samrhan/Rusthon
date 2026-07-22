@@ -68,6 +68,9 @@ pub enum IRExpr {
     UnaryOp { op: UnaryOp, operand: Box<IRExpr> },
     /// A list literal.
     List(Vec<IRExpr>),
+    /// A tuple literal, e.g. `(a, b, c)`. Same heap layout as a list but
+    /// immutable and separately tagged.
+    Tuple(Vec<IRExpr>),
     /// List indexing.
     Index {
         list: Box<IRExpr>,
@@ -124,6 +127,9 @@ pub enum IRStmt {
         index: IRExpr,
         value: IRExpr,
     },
+    /// Tuple-unpacking assignment `t0, t1, ... = value`, where `value`
+    /// evaluates to a tuple/sequence of matching length.
+    Unpack { targets: Vec<String>, value: IRExpr },
     /// An expression statement (evaluates an expression and discards the result).
     ExprStmt(IRExpr),
     /// A function definition.

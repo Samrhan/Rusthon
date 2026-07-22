@@ -161,6 +161,47 @@ pub fn compile_index_assign<'ctx>(
     Ok(())
 }
 
+/// Compiles a tuple-unpacking assignment `t0, t1, ... = value`.
+///
+/// The value evaluates to a tuple/sequence (list heap layout); each element is
+/// loaded and stored into the corresponding target variable. Unpacked values
+/// are treated as scalars (arrays do not flow through tuple unpacking).
+pub fn compile_unpack<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    targets: &[String],
+    value: &IRExpr,
+    current_fn: FunctionValue<'ctx>,
+) -> Result<(), CodeGenError> {
+    let seq = compiler.compile_expression(value)?;
+    let (seq_ptr, _len) = compiler.extract_list_ptr_and_len(seq);
+    let pyobject_type = compiler.create_pyobject_type();
+
+    for (i, target) in targets.iter().enumerate() {
+        // Elements start at offset 1 (offset 0 is the length header).
+        let index = compiler.context.i64_type().const_int((i + 1) as u64, false);
+        let elem_ptr = unsafe {
+            compiler
+                .builder
+                .build_in_bounds_gep(pyobject_type, seq_ptr, &[index], "unpack_elem_ptr")
+                .unwrap()
+        };
+        let elem = compiler
+            .builder
+            .build_load(pyobject_type, elem_ptr, "unpack_elem")
+            .unwrap()
+            .into_int_value();
+
+        let ptr = compiler.variables.get(target).copied().unwrap_or_else(|| {
+            let ptr = compiler.create_entry_block_alloca(target, current_fn);
+            compiler.variables.insert(target.to_string(), ptr);
+            ptr
+        });
+        compiler.builder.build_store(ptr, elem).unwrap();
+        compiler.array_vars.remove(target);
+    }
+    Ok(())
+}
+
 /// Compiles an expression statement (expression evaluated for side effects)
 pub fn compile_expr_stmt<'ctx>(
     compiler: &mut Compiler<'ctx>,

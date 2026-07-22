@@ -95,7 +95,8 @@ Tagged: [1][11111111111][1][ tag (3 bits) ][ payload (48 bits) ]
 - `TAG_BOOL = 1`: boolean (1-bit payload)
 - `TAG_STRING = 2`: string pointer (48-bit)
 - `TAG_LIST = 3`: list pointer (48-bit)
-- `TAG_ARRAY = 4`: NumPy `ndarray` pointer (48-bit); detected via `ValueManager::is_array`
+- `TAG_ARRAY = 4`: NumPy `ndarray` pointer (48-bit); dispatched at compile time via arrayness analysis
+- `TAG_TUPLE = 5`: tuple pointer (48-bit); same heap layout as a list, detected via `ValueManager::is_tuple`
 - Floats: no tag (stored as canonical float64)
 
 **Constants** (`compiler/values.rs`):
@@ -179,10 +180,11 @@ Value:   3         10          20          30
 | `numpy.rs` | NumPy subset (1-D/2-D arrays, dtypes, module system) | 32 |
 | `precedence.rs` | Operator precedence | 18 |
 | `strings.rs` | String operations | 28 |
+| `tuples.rs` | Tuples: literals, indexing, `len`, unpacking, multiple return | 7 |
 | `unary.rs` | Unary operators | 15 |
 | `variables.rs` | Variable assignment | 3 |
 
-**Total**: 216 tests
+**Total**: 223 tests
 
 ### Documentation (`docs/`)
 

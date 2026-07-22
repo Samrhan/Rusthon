@@ -20,7 +20,7 @@ use crate::codegen::{CodeGenError, Compiler};
 use crate::compiler::arrayness::ArrayDtype;
 use crate::compiler::generators::ndarray;
 use crate::compiler::values::{TYPE_TAG_FLOAT, TYPE_TAG_INT, TYPE_TAG_LIST, TYPE_TAG_STRING};
-use inkwell::values::IntValue;
+use inkwell::values::{IntValue, PointerValue};
 use inkwell::FloatPredicate;
 
 // ============================================================================
@@ -237,6 +237,26 @@ pub fn compile_list<'ctx>(
     compiler: &mut Compiler<'ctx>,
     elements: &[IRExpr],
 ) -> Result<IntValue<'ctx>, CodeGenError> {
+    let ptr = build_sequence(compiler, elements)?;
+    Ok(compiler.create_pyobject_list(ptr, elements.len()))
+}
+
+/// Compiles a tuple literal expression `(a, b, c)`. Same heap layout as a list;
+/// only the NaN-box tag differs.
+pub fn compile_tuple<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    elements: &[IRExpr],
+) -> Result<IntValue<'ctx>, CodeGenError> {
+    let ptr = build_sequence(compiler, elements)?;
+    Ok(compiler.create_pyobject_tuple(ptr))
+}
+
+/// Builds a heap `[length][e0][e1]...]` sequence buffer from element
+/// expressions and returns the pointer. Shared by list and tuple literals.
+fn build_sequence<'ctx>(
+    compiler: &mut Compiler<'ctx>,
+    elements: &[IRExpr],
+) -> Result<PointerValue<'ctx>, CodeGenError> {
     // Compile all element expressions
     let mut compiled_elements = Vec::new();
     for elem in elements {
@@ -309,8 +329,7 @@ pub fn compile_list<'ctx>(
         compiler.builder.build_store(elem_ptr, *elem_pyobj).unwrap();
     }
 
-    // Create a PyObject with LIST tag and the pointer as payload
-    Ok(compiler.create_pyobject_list(list_ptr, list_len))
+    Ok(list_ptr)
 }
 
 /// Compiles an indexing expression `obj[index]`.
@@ -479,6 +498,13 @@ fn compile_len_scalar<'ctx>(
             "is_list",
         )
         .unwrap();
+    // Tuples share the list heap layout, so `len` reads the length header the
+    // same way; treat lists and tuples together.
+    let is_tuple = compiler.is_tuple(arg_obj);
+    let is_seq = compiler
+        .builder
+        .build_or(is_list, is_tuple, "is_seq")
+        .unwrap();
 
     // Get current function for creating basic blocks
     let current_fn = compiler
@@ -504,11 +530,11 @@ fn compile_len_scalar<'ctx>(
         .build_conditional_branch(is_string, string_len_block, check_list_block)
         .unwrap();
 
-    // Check if it's a list
+    // Check if it's a list or tuple
     compiler.builder.position_at_end(check_list_block);
     compiler
         .builder
-        .build_conditional_branch(is_list, list_len_block, other_len_block)
+        .build_conditional_branch(is_seq, list_len_block, other_len_block)
         .unwrap();
 
     // String length block

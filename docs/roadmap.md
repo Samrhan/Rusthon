@@ -149,8 +149,22 @@ A fixed 5-word header `[dtype, ndim, size, rows, cols]` carries the shape.
 element-wise ops/reductions (which run over the flat buffer) all work for
 int and float matrices.
 
+**Phase 7 — tuples & multiple return values** ✅ Done
+```python
+def minmax(a, b):
+    return (a, b) if a < b else (b, a)  # multiple return values
+
+t = (10, 20, 30)
+lo, hi = minmax(8, 3)      # unpacking assignment
+print(t[0], t[2], len(t))  # indexing and len
+```
+Tuples reuse the list heap layout (`[len][e0][e1]…]`) with a distinct tag,
+enabling literals, indexing, `len`, unpacking (`a, b = t`) and multiple
+return values (`return a, b`). This is the prerequisite for `.shape`,
+`reshape`, and `np.zeros((m, n))`.
+
 **Next phases** 🔮 Planned
-- Tuples — the prerequisite for `.shape`, `reshape`, `np.zeros((m, n))`.
+- Shape as a tuple: `.shape`, `reshape`, `np.zeros((m, n))`.
 - Row indexing of a matrix (`m[i]` → 1-D), 2-D item/slice assignment.
 - >2 dimensions (variable-length shape), `@` matmul operator.
 - More ufuncs/reductions and dtypes (`np.std`, `bool`, `float32`, `dtype=`).
@@ -172,9 +186,8 @@ my_list[1] = 10
 point = (10, 20)
 x, y = point
 ```
-- Status: 🔮 Future
+- Status: ✅ Completed (see NumPy Phase 7)
 - Difficulty: Medium
-- Dependencies: Multiple return values
 
 ### String Operations
 
@@ -209,13 +222,12 @@ def greet(name="World"):
 **Multiple Return Values**
 ```python
 def min_max(a, b):
-    return a, b if a < b else b, a
+    return (a, b) if a < b else (b, a)
 
 min_val, max_val = min_max(5, 10)
 ```
-- Status: 🔮 Future
+- Status: ✅ Completed (see NumPy Phase 7)
 - Difficulty: Medium
-- Dependencies: Tuples
 
 ## Long Term
 

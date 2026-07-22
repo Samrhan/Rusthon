@@ -41,6 +41,7 @@ const TAG_BOOL: u64 = 1;
 const TAG_STRING: u64 = 2;
 const TAG_LIST: u64 = 3;
 const TAG_ARRAY: u64 = 4;
+const TAG_TUPLE: u64 = 5;
 
 // Legacy type tags (for compatibility with print dispatch logic)
 pub const TYPE_TAG_INT: u8 = 0;
@@ -206,6 +207,43 @@ impl<'ctx> ValueManager<'ctx> {
             .unwrap();
         builder
             .build_or(with_tag, payload, "pyobject_array")
+            .unwrap()
+    }
+
+    /// Creates a PyObject value from a tuple pointer using NaN-boxing.
+    ///
+    /// Tuples share the list heap layout (`[len][e0]...`), so they reuse
+    /// [`extract_list_ptr_and_len`] for reads; only the tag differs.
+    ///
+    /// [`extract_list_ptr_and_len`]: Self::extract_list_ptr_and_len
+    pub fn create_tuple(&self, builder: &Builder<'ctx>, ptr: PointerValue<'ctx>) -> IntValue<'ctx> {
+        let ptr_as_int = builder
+            .build_ptr_to_int(ptr, self.context.i64_type(), "tup_ptr_to_int")
+            .unwrap();
+        let payload_mask = self.context.i64_type().const_int(PAYLOAD_MASK, false);
+        let payload = builder
+            .build_and(ptr_as_int, payload_mask, "tup_ptr_payload")
+            .unwrap();
+        let tag_shifted = self.context.i64_type().const_int(TAG_TUPLE << 48, false);
+        let qnan_const = self.context.i64_type().const_int(QNAN, false);
+        let with_tag = builder
+            .build_or(qnan_const, tag_shifted, "with_tag")
+            .unwrap();
+        builder
+            .build_or(with_tag, payload, "pyobject_tuple")
+            .unwrap()
+    }
+
+    /// Checks if a PyObject is a tuple (full NaN + tag bit comparison).
+    pub fn is_tuple(&self, builder: &Builder<'ctx>, pyobject: IntValue<'ctx>) -> IntValue<'ctx> {
+        let mask = self.context.i64_type().const_int(QNAN | TAG_MASK, false);
+        let expected = self
+            .context
+            .i64_type()
+            .const_int(QNAN | (TAG_TUPLE << 48), false);
+        let masked = builder.build_and(pyobject, mask, "tuple_tag_bits").unwrap();
+        builder
+            .build_int_compare(inkwell::IntPredicate::EQ, masked, expected, "is_tuple")
             .unwrap()
     }
 
